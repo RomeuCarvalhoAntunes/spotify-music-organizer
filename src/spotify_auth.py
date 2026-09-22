@@ -1,5 +1,3 @@
-"""Spotify OAuth authentication utilities."""
-
 import base64
 import hashlib
 import secrets

@@ -1,5 +1,3 @@
-"""Local Spotify token storage utilities."""
-
 import json
 import os
 from pathlib import Path

@@ -1,9 +1,8 @@
-"""Tests for application authentication flow helpers."""
-
 import unittest
 from unittest import mock
 
 from src import main
+from src.database import ImportSummary
 
 
 class MainAuthTest(unittest.IsolatedAsyncioTestCase):
@@ -69,6 +68,47 @@ class MainAuthTest(unittest.IsolatedAsyncioTestCase):
             "existing-refresh",
         )
         persist_mock.assert_called_once_with()
+
+    # Verify a local import fetches items for every available playlist.
+    async def test_import_spotify_library_fetches_all_playlists(self) -> None:
+        playlists = [{"id": "playlist-one"}, {"id": "playlist-two"}]
+        playlist_items = [[{"item": {"id": "track-one"}}], []]
+        summary = ImportSummary(
+            import_id=1,
+            playlist_count=2,
+            playlist_track_count=1,
+            skipped_item_count=0,
+        )
+
+        with (
+            mock.patch(
+                "src.main.get_spotify_access_token",
+                new=mock.AsyncMock(return_value="access-token"),
+            ),
+            mock.patch(
+                "src.main.get_current_user_playlists",
+                new=mock.AsyncMock(return_value=playlists),
+            ),
+            mock.patch(
+                "src.main.get_playlist_items",
+                new=mock.AsyncMock(side_effect=playlist_items),
+            ) as playlist_items_mock,
+            mock.patch(
+                "src.main.import_library",
+                return_value=summary,
+            ) as import_mock,
+        ):
+            result = await main.import_spotify_library()
+
+        self.assertEqual(result, summary.to_dict())
+        self.assertEqual(playlist_items_mock.await_count, 2)
+        import_mock.assert_called_once_with(
+            playlists,
+            {
+                "playlist-one": playlist_items[0],
+                "playlist-two": playlist_items[1],
+            },
+        )
 
 
 if __name__ == "__main__":

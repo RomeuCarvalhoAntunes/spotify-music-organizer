@@ -1,5 +1,3 @@
-"""Application entry point for the Spotify Music Organizer."""
-
 import os
 import secrets
 
@@ -7,6 +5,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import RedirectResponse
 
+from src.database import import_library
 from src.spotify_auth import (
     add_expiration_information,
     build_authorization_url,
@@ -257,3 +256,21 @@ async def playlist_items(playlist_id: str) -> dict[str, object]:
             if item.get("item")
         ],
     }
+
+
+# Import all Spotify playlists and their tracks into the local SQLite database.
+@app.post("/imports")
+async def import_spotify_library() -> dict[str, int]:
+    access_token = await get_spotify_access_token()
+    playlists = await get_current_user_playlists(access_token)
+    playlist_items_by_id = {}
+
+    for playlist in playlists:
+        playlist_items_by_id[playlist["id"]] = await get_playlist_items(
+            access_token=access_token,
+            playlist_id=playlist["id"],
+        )
+
+    import_summary = import_library(playlists, playlist_items_by_id)
+
+    return import_summary.to_dict()

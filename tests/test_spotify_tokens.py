@@ -1,5 +1,3 @@
-"""Tests for local Spotify token storage."""
-
 import stat
 import tempfile
 import unittest

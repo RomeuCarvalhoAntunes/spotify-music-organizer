@@ -1,5 +1,3 @@
-"""Tests for Spotify authentication helpers."""
-
 import unittest
 from unittest import mock
 
