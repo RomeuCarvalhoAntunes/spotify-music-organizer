@@ -1,0 +1,11 @@
+services:
+  app:
+    build:
+      context: .
+    container_name: spotify-music-organizer
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./src:/app/src
+      - ./data:/app/data
+    restart: unless-stopped
