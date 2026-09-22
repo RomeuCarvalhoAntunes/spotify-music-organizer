@@ -8,13 +8,17 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import RedirectResponse
 
 from src.spotify_auth import (
+    add_expiration_information,
     build_authorization_url,
     exchange_code,
     generate_pkce_pair,
     get_current_user,
     get_current_user_playlists,
     get_playlist_items,
+    is_access_token_expired,
+    refresh_access_token,
 )
+from src.spotify_tokens import load_tokens, save_tokens
 
 
 load_dotenv()
@@ -32,13 +36,71 @@ oauth_sessions: dict[str, str] = {}
 spotify_tokens: dict[str, dict] = {}
 
 
+# Load Spotify tokens from local storage into memory.
+def load_spotify_tokens() -> dict[str, dict]:
+    if not spotify_tokens:
+        spotify_tokens.update(load_tokens())
+
+    return spotify_tokens
+
+
+# Persist the current Spotify tokens to local storage.
+def persist_spotify_tokens() -> None:
+    save_tokens(spotify_tokens)
+
+
+# Return a valid Spotify access token, refreshing it when needed.
+async def get_spotify_access_token() -> str:
+    tokens = load_spotify_tokens().get("current_user")
+
+    if not tokens:
+        raise HTTPException(
+            status_code=401,
+            detail="Spotify is not connected.",
+        )
+
+    if not is_access_token_expired(tokens):
+        return tokens["access_token"]
+
+    refresh_token = tokens.get("refresh_token")
+
+    if not refresh_token:
+        raise HTTPException(
+            status_code=401,
+            detail="Spotify refresh token is not available.",
+        )
+
+    client_id = os.getenv("SPOTIFY_CLIENT_ID")
+
+    if not client_id:
+        raise HTTPException(
+            status_code=500,
+            detail="Spotify environment variables are not configured.",
+        )
+
+    refreshed_tokens = await refresh_access_token(
+        client_id=client_id,
+        refresh_token=refresh_token,
+    )
+    refreshed_tokens = add_expiration_information(refreshed_tokens)
+    refreshed_tokens["refresh_token"] = refreshed_tokens.get(
+        "refresh_token",
+        refresh_token,
+    )
+
+    spotify_tokens["current_user"] = refreshed_tokens
+    persist_spotify_tokens()
+
+    return refreshed_tokens["access_token"]
+
+
 # Return basic information about the application.
 @app.get("/")
 def home() -> dict[str, object]:
     return {
         "application": "Spotify Music Organizer",
         "status": "running",
-        "spotify_connected": bool(spotify_tokens),
+        "spotify_connected": bool(load_spotify_tokens()),
     }
 
 
@@ -117,8 +179,10 @@ async def spotify_callback(
         code=code,
         code_verifier=code_verifier,
     )
+    tokens = add_expiration_information(tokens)
 
     spotify_tokens["current_user"] = tokens
+    persist_spotify_tokens()
 
     return {
         "status": "connected",
@@ -128,15 +192,8 @@ async def spotify_callback(
 # Return information about the currently connected Spotify account.
 @app.get("/me")
 async def current_user() -> dict[str, object]:
-    tokens = spotify_tokens.get("current_user")
-
-    if not tokens:
-        raise HTTPException(
-            status_code=401,
-            detail="Spotify is not connected.",
-        )
-
-    profile = await get_current_user(tokens["access_token"])
+    access_token = await get_spotify_access_token()
+    profile = await get_current_user(access_token)
 
     return {
         "account_id": profile.get("account_id"),
@@ -148,16 +205,10 @@ async def current_user() -> dict[str, object]:
 # Return all playlists available to the currently authenticated Spotify user.
 @app.get("/playlists")
 async def current_user_playlists() -> dict[str, object]:
-    tokens = spotify_tokens.get("current_user")
-
-    if not tokens:
-        raise HTTPException(
-            status_code=401,
-            detail="Spotify is not connected.",
-        )
+    access_token = await get_spotify_access_token()
 
     playlists = await get_current_user_playlists(
-        tokens["access_token"],
+        access_token,
     )
 
     return {
@@ -178,16 +229,10 @@ async def current_user_playlists() -> dict[str, object]:
 # Retrieve all tracks from a Spotify playlist without modifying it.
 @app.get("/playlists/{playlist_id}/items")
 async def playlist_items(playlist_id: str) -> dict[str, object]:
-    tokens = spotify_tokens.get("current_user")
-
-    if not tokens:
-        raise HTTPException(
-            status_code=401,
-            detail="Spotify is not connected.",
-        )
+    access_token = await get_spotify_access_token()
 
     items = await get_playlist_items(
-        access_token=tokens["access_token"],
+        access_token=access_token,
         playlist_id=playlist_id,
     )
 

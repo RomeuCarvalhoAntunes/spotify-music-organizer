@@ -3,6 +3,7 @@
 import base64
 import hashlib
 import secrets
+import time
 from urllib.parse import urlencode
 
 import httpx
@@ -17,6 +18,9 @@ SCOPES = [
     "playlist-modify-private",
     "playlist-modify-public",
 ]
+
+TOKEN_EXPIRATION_BUFFER_SECONDS = 60
+
 
 # Generate the PKCE code verifier and its corresponding challenge.
 def generate_pkce_pair() -> tuple[str, str]:
@@ -71,6 +75,48 @@ async def exchange_code(
 
     response.raise_for_status()
     return response.json()
+
+
+# Add a local expiration timestamp to Spotify token responses.
+def add_expiration_information(tokens: dict) -> dict:
+    updated_tokens = tokens.copy()
+    expires_in = int(updated_tokens.get("expires_in", 0))
+    updated_tokens["expires_at"] = int(time.time()) + expires_in
+
+    return updated_tokens
+
+
+# Determine whether the access token should be refreshed before use.
+def is_access_token_expired(tokens: dict) -> bool:
+    expires_at = tokens.get("expires_at")
+
+    if not expires_at:
+        return True
+
+    return int(expires_at) <= int(time.time()) + TOKEN_EXPIRATION_BUFFER_SECONDS
+
+
+# Refresh a Spotify access token using the stored refresh token.
+async def refresh_access_token(
+    client_id: str,
+    refresh_token: str,
+) -> dict:
+    data = {
+        "grant_type": "refresh_token",
+        "client_id": client_id,
+        "refresh_token": refresh_token,
+    }
+
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            SPOTIFY_TOKEN_URL,
+            data=data,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+
+    response.raise_for_status()
+    return response.json()
+
 
 # Retrieve the profile of the currently authenticated Spotify user.
 async def get_current_user(access_token: str) -> dict:
