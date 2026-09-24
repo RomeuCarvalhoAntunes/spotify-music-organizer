@@ -1,11 +1,28 @@
 import os
 import secrets
+import sqlite3
+from typing import Literal
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query, Response, status
 from fastapi.responses import RedirectResponse
+from pydantic import BaseModel, Field
 
-from src.database import import_library
+from src.database import (
+    create_connection,
+    create_genre,
+    create_genre_rule,
+    delete_genre,
+    delete_genre_rule,
+    get_genre,
+    import_library,
+    list_genre_rules,
+    list_genres,
+    list_track_genres,
+    list_tracks_needing_review,
+    rebuild_classifications,
+    update_genre,
+)
 from src.spotify_auth import (
     add_expiration_information,
     build_authorization_url,
@@ -33,6 +50,24 @@ app = FastAPI(
 
 oauth_sessions: dict[str, str] = {}
 spotify_tokens: dict[str, dict] = {}
+
+
+class GenreCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    description: str = Field(min_length=1, max_length=2000)
+    enabled: bool = True
+
+
+class GenreUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    description: str | None = Field(default=None, min_length=1, max_length=2000)
+    enabled: bool | None = None
+
+
+class GenreRuleCreateRequest(BaseModel):
+    genre_id: int = Field(gt=0)
+    resource_type: Literal["track", "album", "artist"]
+    spotify_id: str = Field(min_length=1, max_length=100)
 
 
 # Load Spotify tokens from local storage into memory.
@@ -274,3 +309,153 @@ async def import_spotify_library() -> dict[str, int]:
     import_summary = import_library(playlists, playlist_items_by_id)
 
     return import_summary.to_dict()
+
+
+# List local genres configured by the user.
+@app.get("/genres")
+def genres(include_disabled: bool = True) -> dict[str, object]:
+    items = list_genres(include_disabled=include_disabled)
+
+    return {"total": len(items), "items": items}
+
+
+# Create a local genre without performing any Spotify operation.
+@app.post("/genres", status_code=status.HTTP_201_CREATED)
+def create_local_genre(genre: GenreCreateRequest) -> dict[str, object]:
+    try:
+        return create_genre(
+            name=genre.name,
+            description=genre.description,
+            enabled=genre.enabled,
+        )
+    except sqlite3.IntegrityError as error:
+        raise HTTPException(
+            status_code=409,
+            detail="A genre with this name already exists.",
+        ) from error
+
+
+# Return one local genre by its identifier.
+@app.get("/genres/{genre_id}")
+def genre(genre_id: int) -> dict[str, object]:
+    item = get_genre(genre_id)
+
+    if not item:
+        raise HTTPException(status_code=404, detail="Genre was not found.")
+
+    return item
+
+
+# Edit or enable or disable a local genre.
+@app.patch("/genres/{genre_id}")
+def update_local_genre(
+    genre_id: int,
+    genre_update: GenreUpdateRequest,
+) -> dict[str, object]:
+    if not genre_update.model_fields_set:
+        raise HTTPException(status_code=400, detail="No genre fields were provided.")
+
+    try:
+        item = update_genre(
+            genre_id=genre_id,
+            name=genre_update.name,
+            description=genre_update.description,
+            enabled=genre_update.enabled,
+        )
+    except sqlite3.IntegrityError as error:
+        raise HTTPException(
+            status_code=409,
+            detail="A genre with this name already exists.",
+        ) from error
+
+    if not item:
+        raise HTTPException(status_code=404, detail="Genre was not found.")
+
+    return item
+
+
+# Delete a local genre and its local configuration.
+@app.delete("/genres/{genre_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_local_genre(genre_id: int) -> Response:
+    if not delete_genre(genre_id):
+        raise HTTPException(status_code=404, detail="Genre was not found.")
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# List reusable local classification rules.
+@app.get("/genre-rules")
+def genre_rules() -> dict[str, object]:
+    items = list_genre_rules()
+
+    return {"total": len(items), "items": items}
+
+
+# Create a local rule for a track, album, or artist.
+@app.post("/genre-rules", status_code=status.HTTP_201_CREATED)
+def create_local_genre_rule(
+    genre_rule: GenreRuleCreateRequest,
+) -> dict[str, object]:
+    if not get_genre(genre_rule.genre_id):
+        raise HTTPException(status_code=404, detail="Genre was not found.")
+
+    try:
+        item = create_genre_rule(
+            genre_id=genre_rule.genre_id,
+            resource_type=genre_rule.resource_type,
+            spotify_id=genre_rule.spotify_id,
+        )
+    except sqlite3.IntegrityError as error:
+        raise HTTPException(
+            status_code=409,
+            detail="This genre rule already exists.",
+        ) from error
+
+    if not item:
+        raise HTTPException(status_code=500, detail="Genre rule was not created.")
+
+    return item
+
+
+# Delete a reusable local rule.
+@app.delete("/genre-rules/{rule_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_local_genre_rule(rule_id: int) -> Response:
+    if not delete_genre_rule(rule_id):
+        raise HTTPException(status_code=404, detail="Genre rule was not found.")
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# Recalculate local classifications from the currently configured rules.
+@app.post("/classifications/rebuild")
+def rebuild_local_classifications() -> dict[str, int]:
+    connection = None
+
+    try:
+        connection = create_connection()
+
+        with connection:
+            return rebuild_classifications(connection)
+    finally:
+        if connection:
+            connection.close()
+
+
+# List imported tracks that still need a user classification decision.
+@app.get("/classification/review")
+def classification_review(
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+) -> dict[str, object]:
+    return list_tracks_needing_review(limit=limit, offset=offset)
+
+
+# Return current local genre classifications for one imported Spotify track.
+@app.get("/tracks/{spotify_id}/genres")
+def track_genres(spotify_id: str) -> dict[str, object]:
+    items = list_track_genres(spotify_id)
+
+    if items is None:
+        raise HTTPException(status_code=404, detail="Track was not found.")
+
+    return {"spotify_id": spotify_id, "total": len(items), "items": items}
