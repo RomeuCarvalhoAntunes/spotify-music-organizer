@@ -9,6 +9,7 @@ from src.database import (
     create_genre_rule,
     generate_local_playlists,
     get_classification_progress,
+    record_automatic_attempts,
     delete_genre,
     import_library,
     list_genres,
@@ -384,6 +385,17 @@ class DatabaseTest(unittest.TestCase):
             self.assertEqual(progress["automatically_classified_count"], 1)
             self.assertEqual(progress["manually_classified_count"], 0)
             self.assertEqual(progress["needs_manual_count"], 0)
+
+            record_automatic_attempts(
+                ["track-one", "missing-track"],
+                provider="lastfm",
+                matched_spotify_ids=set(),
+                path=database_path,
+            )
+            self.assertEqual(
+                get_classification_progress(path=database_path)["needs_manual_count"],
+                0,
+            )
 
     # Verify unclassified imported tracks are available for manual review.
     def test_review_queue_lists_unclassified_tracks(self) -> None:

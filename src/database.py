@@ -140,6 +140,15 @@ def initialize_database(connection: sqlite3.Connection) -> None:
             FOREIGN KEY (genre_id) REFERENCES genres(id) ON DELETE CASCADE
         );
 
+        CREATE TABLE IF NOT EXISTS automatic_classification_attempts (
+            track_id INTEGER NOT NULL,
+            provider TEXT NOT NULL,
+            matched INTEGER NOT NULL DEFAULT 0,
+            attempted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (track_id, provider),
+            FOREIGN KEY (track_id) REFERENCES tracks(id) ON DELETE CASCADE
+        );
+
         CREATE TABLE IF NOT EXISTS local_playlists (
             id INTEGER PRIMARY KEY,
             genre_id INTEGER NOT NULL UNIQUE,
@@ -975,6 +984,44 @@ def get_classification_progress(path: Path | None = None) -> dict[str, int]:
         connection.close()
 
 
+# Record provider attempts, including tracks with no matching genre.
+def record_automatic_attempts(
+    spotify_ids: list[str],
+    provider: str,
+    matched_spotify_ids: set[str],
+    path: Path | None = None,
+) -> None:
+    connection = create_connection(path)
+
+    try:
+        with connection:
+            for spotify_id in spotify_ids:
+                track = connection.execute(
+                    "SELECT id FROM tracks WHERE spotify_id = ?",
+                    (spotify_id,),
+                ).fetchone()
+                if not track:
+                    continue
+                connection.execute(
+                    """
+                    INSERT INTO automatic_classification_attempts (
+                        track_id, provider, matched
+                    )
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(track_id, provider) DO UPDATE SET
+                        matched = excluded.matched,
+                        attempted_at = CURRENT_TIMESTAMP
+                    """,
+                    (
+                        int(track[0]),
+                        provider,
+                        int(spotify_id in matched_spotify_ids),
+                    ),
+                )
+    finally:
+        connection.close()
+
+
 # Return imported tracks that have not been processed by automatic classification.
 def list_tracks_for_automatic_classification(
     limit: int,
@@ -998,8 +1045,12 @@ def list_tracks_for_automatic_classification(
                 ON automatic_track_genres.track_id = tracks.id
             LEFT JOIN track_genres
                 ON track_genres.track_id = tracks.id
+            LEFT JOIN automatic_classification_attempts
+                ON automatic_classification_attempts.track_id = tracks.id
+               AND automatic_classification_attempts.provider = 'lastfm'
             WHERE automatic_track_genres.track_id IS NULL
               AND track_genres.track_id IS NULL
+              AND automatic_classification_attempts.track_id IS NULL
             ORDER BY tracks.id
             LIMIT ? OFFSET ?
             """,

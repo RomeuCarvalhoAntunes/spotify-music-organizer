@@ -31,6 +31,7 @@ from src.database import (
     generate_local_playlists,
     list_local_playlists,
     store_automatic_classifications,
+    record_automatic_attempts,
     list_tracks_needing_review,
     rebuild_classifications,
     update_genre,
@@ -531,11 +532,21 @@ async def automatic_classification(
         classifications=classifications,
         provider="lastfm",
     )
+    matched_spotify_ids = {
+        str(classification["spotify_id"])
+        for classification in classifications
+    }
+    record_automatic_attempts(
+        spotify_ids=[str(track["spotify_id"]) for track in tracks],
+        provider="lastfm",
+        matched_spotify_ids=matched_spotify_ids,
+    )
 
     return {
         "provider": "lastfm",
         "processed_track_count": len(tracks),
         "matched_track_count": stored["classified_track_count"],
+        "no_match_track_count": len(tracks) - stored["classified_track_count"],
         "classification_count": stored["classification_count"],
         "progress": get_classification_progress(),
     }
