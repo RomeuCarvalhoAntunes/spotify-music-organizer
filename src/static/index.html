@@ -26,8 +26,10 @@
       </div>
       <div class="quick-actions">
         <button id="import-button" class="button">Importar biblioteca</button>
-        <button id="auto-button" class="button button-secondary">Classificar automaticamente</button>
+        <button id="auto-button" class="button button-secondary">Classificar lote de 300</button>
+        <button id="spotify-rules-button" class="button button-secondary">Analisar regras do Spotify</button>
         <button id="generate-playlists-button" class="button button-secondary">Gerar playlists locais</button>
+        <button id="reset-button" class="button button-danger">Zerar classificações locais</button>
         <button id="refresh-button" class="button button-secondary">Atualizar status</button>
       </div>
     </section>
@@ -59,6 +61,12 @@
         <div><strong id="manual-total">0</strong><small>Classificadas manualmente</small></div>
         <div><strong id="pending-total">0</strong><small>Precisam de revisão</small></div>
       </div>
+    </section>
+
+    <section id="spotify-rules" class="panel">
+      <div class="panel-heading"><div><p class="eyebrow">Regra inversa</p><h2>Playlists do Spotify usadas como gênero</h2></div><span id="spotify-rule-count" class="count-badge">não analisadas</span></div>
+      <p class="muted">Playlists com nome de gênero são consideradas corretas. Playlists de contexto, origem ou artista ficam fora da classificação.</p>
+      <div id="spotify-rule-list" class="spotify-rule-list"><p class="muted">Clique em “Analisar regras do Spotify”.</p></div>
     </section>
 
     <section id="local-playlists" class="panel">

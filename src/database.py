@@ -402,6 +402,44 @@ def convert_boolean(value: object) -> int | None:
     return int(bool(value))
 
 
+# Return the last imported Spotify playlists and their track snapshot.
+def list_imported_playlist_snapshots(path: Path | None = None) -> list[dict[str, object]]:
+    connection = create_connection(path)
+    try:
+        rows = connection.execute(
+            """
+            SELECT
+                playlists.spotify_id,
+                playlists.name,
+                playlists.spotify_url,
+                COUNT(playlist_tracks.track_id) AS track_count,
+                tracks.spotify_id AS track_spotify_id
+            FROM playlists
+            LEFT JOIN playlist_tracks ON playlist_tracks.playlist_id = playlists.id
+            LEFT JOIN tracks ON tracks.id = playlist_tracks.track_id
+            GROUP BY playlists.id, tracks.id
+            ORDER BY playlists.id, tracks.id
+            """
+        ).fetchall()
+        result: dict[str, dict[str, object]] = {}
+        for playlist_id, name, spotify_url, track_count, track_spotify_id in rows:
+            playlist = result.setdefault(
+                str(playlist_id),
+                {
+                    "id": str(playlist_id),
+                    "name": str(name),
+                    "spotify_url": spotify_url,
+                    "track_count": int(track_count),
+                    "items": [],
+                },
+            )
+            if track_spotify_id:
+                playlist["items"].append({"item": {"id": str(track_spotify_id)}})
+        return list(result.values())
+    finally:
+        connection.close()
+
+
 # Return the configured genres, optionally including disabled entries.
 def list_genres(
     include_disabled: bool = True,
@@ -802,6 +840,29 @@ def store_automatic_classifications(
             "classified_track_count": len(classified_track_ids),
             "classification_count": classification_count,
         }
+    finally:
+        connection.close()
+
+
+# Remove all local classifications while preserving imported library and genres.
+def reset_local_classifications(path: Path | None = None) -> dict[str, int]:
+    connection = create_connection(path)
+    try:
+        with connection:
+            counts = {
+                "manual_rules": int(connection.execute("SELECT COUNT(*) FROM genre_rules").fetchone()[0]),
+                "manual_classifications": int(connection.execute("SELECT COUNT(*) FROM track_genres").fetchone()[0]),
+                "automatic_classifications": int(connection.execute("SELECT COUNT(*) FROM automatic_track_genres").fetchone()[0]),
+                "automatic_attempts": int(connection.execute("SELECT COUNT(*) FROM automatic_classification_attempts").fetchone()[0]),
+                "local_playlist_tracks": int(connection.execute("SELECT COUNT(*) FROM local_playlist_tracks").fetchone()[0]),
+            }
+            connection.execute("DELETE FROM local_playlist_tracks")
+            connection.execute("DELETE FROM local_playlists")
+            connection.execute("DELETE FROM automatic_classification_attempts")
+            connection.execute("DELETE FROM automatic_track_genres")
+            connection.execute("DELETE FROM track_genres")
+            connection.execute("DELETE FROM genre_rules")
+        return counts
     finally:
         connection.close()
 

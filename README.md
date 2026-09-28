@@ -73,7 +73,10 @@ DELETE /genre-rules/{rule_id}
 
 POST   /classification/decisions
 POST   /classifications/automatic
+GET    /classifications/automatic/{job_id}
 GET    /classifications/progress
+POST   /classifications/reset
+GET    /spotify/classification-rules
 POST   /local-playlists
 GET    /local-playlists
 POST   /classifications/rebuild
@@ -128,7 +131,7 @@ Na própria tela, siga esta ordem:
 
 As playlists são locais e ordenadas da faixa mais recente para a mais antiga. Nenhuma alteração é enviada ao Spotify nesta etapa.
 
-O botão **Atualizar status** recarrega o progresso, a fila e as playlists sem precisar acessar uma URL de API.
+O botão **Atualizar status** recarrega o progresso, a fila e as playlists sem precisar acessar uma URL de API. O botão **Analisar regras do Spotify** mostra quais playlists foram interpretadas como gêneros e quais foram ignoradas por serem de contexto, origem ou artista. **Zerar classificações locais** remove somente classificações e playlists locais, preservando a biblioteca importada.
 
 ### Verificação técnica opcional
 
@@ -150,7 +153,7 @@ curl "http://127.0.0.1:8000/genres?include_disabled=false"
 
 As playlists locais são geradas por gênero a partir das classificações disponíveis. Cada playlist ordena as faixas por data de adição na biblioteca, da mais recente para a mais antiga, e não altera o Spotify.
 
-A classificação automática usa inicialmente as tags do Last.fm. Para habilitá-la, solicite uma API key no Last.fm e preencha LASTFM_API_KEY no .env. As faixas classificadas recebem evidência e confiança localmente; casos sem correspondência continuam na revisão manual.
+A classificação automática usa primeiro as playlists de gênero presentes no snapshot da última importação do Spotify, com confiança 1.0. Playlists como Tudão da massa, Faixas do Shazam, Banho, Academia, Trabalho, Cross, Resto, Old The Game e Official The Game não são tratadas como gêneros. Faixas fora dessas playlists podem usar as tags do Last.fm, e casos sem correspondência continuam na revisão manual. O botão processa até 300 faixas por lote e mostra fase, percentual e faixa atual na interface.
 
 A interface web está disponível em:
 

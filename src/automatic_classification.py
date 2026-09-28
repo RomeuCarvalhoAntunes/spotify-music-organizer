@@ -1,6 +1,6 @@
 import os
 import unicodedata
-from collections.abc import Iterable
+from collections.abc import Awaitable, Callable, Iterable
 
 import httpx
 
@@ -17,7 +17,81 @@ def normalize_tag(value: str) -> str:
         character for character in normalized
         if not unicodedata.combining(character)
     )
-    return " ".join(without_accents.lower().replace("-", " ").split())
+    return " ".join(
+        without_accents.lower().replace("-", " ").replace("/", " ").split()
+    )
+
+
+SPOTIFY_PLAYLIST_GENRE_ALIASES: dict[str, str] = {
+    "alternativa": "Alternativa",
+    "axe": "Axé",
+    "blues": "Jazz / Blues",
+    "dance": "Dance",
+    "eletronica": "Eletrônica",
+    "dubstep": "Dubstep",
+    "forro": "Forró",
+    "funk": "Funk",
+    "best do funk": "Funk",
+    "hip hop rap": "Hip-Hop",
+    "latina": "Latina",
+    "pop": "Pop",
+    "rap nacional": "Rap Nacional",
+    "reggae": "Reggae",
+    "soundtrack": "Soundtrack",
+    "sertanejo": "Sertanejo",
+    "rock": "Rock",
+    "samba": "Samba",
+    "samba de domingo": "Samba",
+    "mpb": "MPB",
+    "r&b soul": "R&B / Soul",
+    "modao": "Modão",
+    "xote": "Xote",
+    "trap": "Trap",
+    "pisadinha": "Pisadinha",
+    "pagode v2": "Pagode",
+    "pagode com samba": "Pagode",
+}
+
+
+# Map only playlists whose names explicitly represent a genre.
+def map_spotify_playlist_to_genre(playlist_name: str) -> str | None:
+    return SPOTIFY_PLAYLIST_GENRE_ALIASES.get(normalize_tag(playlist_name))
+
+
+# Build classifications from the user's own genre playlists.
+def classify_tracks_with_spotify_playlists(
+    tracks: list[dict[str, object]],
+    playlist_tracks_by_genre: dict[str, list[dict[str, object]]],
+    genre_ids_by_name: dict[str, int],
+) -> list[dict[str, object]]:
+    tracks_by_id = {str(track["spotify_id"]): track for track in tracks}
+    classifications: dict[str, dict[str, object]] = {}
+
+    for genre_name, playlist_items in playlist_tracks_by_genre.items():
+        genre_id = genre_ids_by_name.get(genre_name)
+        if not genre_id:
+            continue
+        for item in playlist_items:
+            track = item.get("item") or item.get("track") or {}
+            spotify_id = str(track.get("id", ""))
+            if spotify_id not in tracks_by_id:
+                continue
+            entry = classifications.setdefault(
+                spotify_id,
+                {"spotify_id": spotify_id, "genre_ids": [], "evidence": []},
+            )
+            entry["genre_ids"].append(genre_id)
+            entry["evidence"].append(genre_name)
+
+    return [
+        {
+            "spotify_id": spotify_id,
+            "genre_ids": list(dict.fromkeys(entry["genre_ids"])),
+            "confidence": 1.0,
+            "evidence": "Playlist Spotify: " + ", ".join(dict.fromkeys(entry["evidence"])),
+        }
+        for spotify_id, entry in classifications.items()
+    ]
 
 
 GENRE_TAG_ALIASES: dict[str, tuple[str, ...]] = {
@@ -131,11 +205,12 @@ async def classify_tracks_with_lastfm(
     tracks: list[dict[str, object]],
     genre_ids_by_name: dict[str, int],
     api_key: str,
+    progress_callback: Callable[[int, dict[str, object]], Awaitable[None]] | None = None,
 ) -> list[dict[str, object]]:
     classifications: list[dict[str, object]] = []
 
     async with httpx.AsyncClient(timeout=15.0) as client:
-        for track in tracks:
+        for index, track in enumerate(tracks):
             artists = track.get("artists") or []
             artist_name = (
                 str(artists[0].get("name"))
@@ -156,7 +231,7 @@ async def classify_tracks_with_lastfm(
                     api_key,
                 )
             except (httpx.HTTPError, ValueError):
-                continue
+                tags = []
 
             genre_ids = map_tags_to_genres(tags, genre_ids_by_name)
             if genre_ids:
@@ -168,6 +243,8 @@ async def classify_tracks_with_lastfm(
                         "evidence": ", ".join(tags[:8]),
                     }
                 )
+            if progress_callback:
+                await progress_callback(index + 1, track)
 
     return classifications
 

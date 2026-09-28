@@ -1,4 +1,4 @@
-const state = { genres: [], review: [], progress: null };
+const state = { genres: [], review: [], progress: null, automaticJob: null };
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -79,6 +79,20 @@ function renderLocalPlaylists(playlists) {
 async function loadLocalPlaylists() {
   const data = await api("/local-playlists");
   renderLocalPlaylists(data.items);
+}
+
+function renderSpotifyRules(data) {
+  $("#spotify-rule-count").textContent = data.genre_playlist_count + " de " + data.total_playlists;
+  const list = $("#spotify-rule-list");
+  const mapped = data.playlists.filter((playlist) => playlist.genre);
+  const ignored = data.playlists.filter((playlist) => !playlist.genre);
+  list.innerHTML = '<div class="rule-summary"><strong>' + mapped.length + ' playlists de gênero</strong><span>' + ignored.length + ' playlists ignoradas por serem contexto/origem/artista</span></div><div class="spotify-rule-grid">' + data.playlists.map((playlist) => '<article class="spotify-rule-card"><div><strong>' + escapeHtml(playlist.name) + '</strong><span>' + playlist.track_count + ' faixas</span></div><small>' + escapeHtml(playlist.rule) + '</small></article>').join("") + '</div>';
+}
+
+async function loadSpotifyRules() {
+  const data = await api("/spotify/classification-rules");
+  renderSpotifyRules(data);
+  return data;
 }
 
 async function loadProgress() {
@@ -163,14 +177,63 @@ $("#generate-playlists-button").addEventListener("click", async () => {
   }
 });
 
+async function watchAutomaticJob(jobId, button) {
+  const response = await api("/classifications/automatic/" + jobId);
+  state.automaticJob = response;
+  const percent = response.total ? Math.round(response.processed / response.total * 100) : 0;
+  showMessage("Classificando: " + percent + "% · " + response.phase + (response.current_track ? " · " + response.current_track : ""));
+  $("#auto-button").textContent = "Classificar lote de 300 (" + percent + "%)";
+  if (response.status === "queued" || response.status === "running") {
+    window.setTimeout(() => watchAutomaticJob(jobId, button), 700);
+    return;
+  }
+  button.disabled = false;
+  $("#auto-button").textContent = "Classificar lote de 300";
+  if (response.status === "error") {
+    showMessage(response.error || "A classificação falhou.", true);
+    return;
+  }
+  showMessage(response.matched + " faixa(s) classificadas no lote. " + response.no_match + " precisam de revisão.");
+  await loadStatus();
+}
+
 $("#auto-button").addEventListener("click", async () => {
   const button = $("#auto-button");
   button.disabled = true;
-  showMessage("Classificando faixas automaticamente...");
   try {
-    const result = await api("/classifications/automatic?limit=25", { method: "POST" });
-    showMessage(result.matched_track_count + " faixa(s) classificadas automaticamente.");
+    const result = await api("/classifications/automatic?limit=300", { method: "POST" });
+    showMessage("Preparando classificação pelas playlists do Spotify...");
+    await watchAutomaticJob(result.job_id, button);
+  } catch (error) {
+    button.disabled = false;
+    button.textContent = "Classificar lote de 300";
+    showMessage(error.message, true);
+  }
+});
+
+$("#spotify-rules-button").addEventListener("click", async () => {
+  const button = $("#spotify-rules-button");
+  button.disabled = true;
+  showMessage("Lendo playlists do Spotify e inferindo as regras...");
+  try {
+    const data = await loadSpotifyRules();
+    showMessage(data.genre_playlist_count + " playlists de gênero identificadas; " + data.ignored_playlist_count + " ignoradas.");
+  } catch (error) {
+    showMessage(error.message, true);
+  } finally {
+    button.disabled = false;
+  }
+});
+
+$("#reset-button").addEventListener("click", async () => {
+  if (!window.confirm("Zerar todas as classificações, regras e playlists locais? A biblioteca importada será preservada.")) return;
+  const button = $("#reset-button");
+  button.disabled = true;
+  try {
+    const result = await api("/classifications/reset", { method: "POST" });
+    showMessage("Reset concluído: " + result.automatic_classifications + " classificações automáticas e " + result.manual_classifications + " manuais removidas.");
     await loadStatus();
+    await loadLocalPlaylists();
   } catch (error) {
     showMessage(error.message, true);
   } finally {
