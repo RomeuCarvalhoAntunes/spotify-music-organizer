@@ -69,3 +69,12 @@ fieldset { border: 1px solid var(--line); border-radius: 8px; padding: 12px; mar
 .text-link { color: var(--green); text-decoration: none; }
 footer { color: var(--muted); text-align: center; padding: 12px 20px 35px; font-size: 12px; }
 @media (max-width: 820px) { .topbar { padding: 14px 20px; flex-wrap: wrap; } .brand { width: 100%; } .status-list { order: 3; } .hero, .dashboard-grid, .review-layout { display: block; } .quick-actions { margin-top: 22px; } .decision-form { border-left: 0; border-top: 1px solid var(--line); padding: 24px 0 0; margin-top: 20px; } .genre-list { grid-template-columns: 1fr; } }
+
+.progress-bar { height: 9px; border-radius: 999px; background: #0e110f; overflow: hidden; margin: -5px 0 22px; }
+.progress-bar span { display: block; width: 0; height: 100%; border-radius: inherit; background: var(--green); transition: width .25s ease; }
+.progress-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.progress-grid div { border: 1px solid var(--line); border-radius: 10px; background: var(--panel-soft); padding: 13px; }
+.progress-grid strong, .progress-grid small { display: block; }
+.progress-grid strong { font-size: 24px; margin-bottom: 4px; }
+.review-actions { display: flex; gap: 7px; flex-shrink: 0; }
+@media (max-width: 820px) { .progress-grid { grid-template-columns: repeat(2, 1fr); } }

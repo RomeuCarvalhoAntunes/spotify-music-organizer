@@ -1,4 +1,4 @@
-const state = { genres: [], review: [] };
+const state = { genres: [], review: [], progress: null };
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -36,7 +36,10 @@ function renderReview() {
   list.innerHTML = state.review.map((track) => `
     <div class="review-item">
       <div><strong>${escapeHtml(track.name)}</strong><small>${escapeHtml(track.artists.map((artist) => artist.name).join(", "))} · ${escapeHtml(track.album_name || "Álbum desconhecido")}</small></div>
-      <button class="button button-secondary choose-track" data-id="${escapeHtml(track.spotify_id)}">Classificar</button>
+      <div class="review-actions">
+        <a class="button button-secondary" href="${escapeHtml(track.spotify_url)}" target="_blank" rel="noopener">Ouvir</a>
+        <button class="button button-secondary choose-track" data-id="${escapeHtml(track.spotify_id)}">Classificar</button>
+      </div>
     </div>
   `).join("");
   document.querySelectorAll(".choose-track").forEach((button) => button.addEventListener("click", () => {
@@ -55,6 +58,17 @@ function renderGenres() {
   $("#genre-list").innerHTML = state.genres.map((genre) => `
     <article class="genre-card"><strong>${escapeHtml(genre.name)}</strong><p>${escapeHtml(genre.description)}</p></article>
   `).join("");
+}
+
+async function loadProgress() {
+  const progress = await api("/classifications/progress");
+  const percentage = progress.library_count ? Math.round(progress.classified_count / progress.library_count * 100) : 0;
+  $("#progress-label").textContent = percentage + "%";
+  $("#progress-bar-fill").style.width = percentage + "%";
+  $("#library-total").textContent = progress.library_count;
+  $("#automatic-total").textContent = progress.automatically_classified_count;
+  $("#manual-total").textContent = progress.manually_classified_count;
+  $("#pending-total").textContent = progress.needs_manual_count;
 }
 
 async function loadReview() {
@@ -90,6 +104,7 @@ async function loadStatus() {
   }
   try {
     await loadReview();
+    await loadProgress();
     setDot("#review-dot", state.review.length === 0);
   } catch (error) {
     showMessage(error.message, true);
@@ -103,6 +118,21 @@ $("#import-button").addEventListener("click", async () => {
   try {
     const result = await api("/imports", { method: "POST" });
     showMessage(`Importação concluída: ${result.playlist_count} playlists e ${result.playlist_track_count} relações.`);
+    await loadStatus();
+  } catch (error) {
+    showMessage(error.message, true);
+  } finally {
+    button.disabled = false;
+  }
+});
+
+$("#auto-button").addEventListener("click", async () => {
+  const button = $("#auto-button");
+  button.disabled = true;
+  showMessage("Classificando faixas automaticamente...");
+  try {
+    const result = await api("/classifications/automatic?limit=25", { method: "POST" });
+    showMessage(result.matched_track_count + " faixa(s) classificadas automaticamente.");
     await loadStatus();
   } catch (error) {
     showMessage(error.message, true);

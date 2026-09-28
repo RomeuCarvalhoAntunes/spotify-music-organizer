@@ -26,6 +26,7 @@
       </div>
       <div class="quick-actions">
         <button id="import-button" class="button">Importar biblioteca</button>
+        <button id="auto-button" class="button button-secondary">Classificar automaticamente</button>
         <button id="refresh-button" class="button button-secondary">Atualizar status</button>
       </div>
     </section>
@@ -46,6 +47,17 @@
         <p id="account-detail" class="muted">Conecte sua conta para importar playlists e faixas.</p>
         <a class="text-link" href="/login">Abrir autorização →</a>
       </article>
+    </section>
+
+    <section class="panel">
+      <div class="panel-heading"><div><p class="eyebrow">Progresso</p><h2>Estado da biblioteca</h2></div><span id="progress-label" class="count-badge">0%</span></div>
+      <div class="progress-bar"><span id="progress-bar-fill"></span></div>
+      <div class="progress-grid">
+        <div><strong id="library-total">0</strong><small>Biblioteca completa</small></div>
+        <div><strong id="automatic-total">0</strong><small>Classificadas automaticamente</small></div>
+        <div><strong id="manual-total">0</strong><small>Classificadas manualmente</small></div>
+        <div><strong id="pending-total">0</strong><small>Precisam de revisão</small></div>
+      </div>
     </section>
 
     <section id="review" class="panel">
