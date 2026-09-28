@@ -104,19 +104,43 @@ Pré-requisitos:
 - O arquivo `.env` local já contém o Client ID fornecido e a URL http://127.0.0.1:8000/callback.
 - No painel do Spotify, adicione exatamente essa URL como Redirect URI.
 
-Subir a aplicação:
+### Teste pela interface
+
+Depois de configurar o aplicativo no Spotify e o `.env`, o uso normal precisa de apenas um comando para iniciar a aplicação:
 
 ```bash
 docker compose up --build -d
 ```
 
-Verificar a saúde:
+Abra no navegador:
+
+```text
+http://127.0.0.1:8000/
+```
+
+Na própria tela, siga esta ordem:
+
+1. Clique em **Conectar Spotify** e autorize o acesso.
+2. Clique em **Importar biblioteca**.
+3. Use **Classificar automaticamente** para processar um lote de faixas.
+4. Na fila de revisão, clique em **Ouvir** para abrir a faixa no Spotify e em **Classificar** para registrar uma decisão manual.
+5. Clique em **Gerar playlists locais** para atualizar a prévia por gênero.
+
+As playlists são locais e ordenadas da faixa mais recente para a mais antiga. Nenhuma alteração é enviada ao Spotify nesta etapa.
+
+O botão **Atualizar status** recarrega o progresso, a fila e as playlists sem precisar acessar uma URL de API.
+
+### Verificação técnica opcional
+
+Se quiser verificar a saúde da aplicação pelo terminal:
 
 ```bash
 curl http://127.0.0.1:8000/health
 ```
 
-Após autorizar em http://127.0.0.1:8000/login:
+O endereço de autorização também pode ser aberto diretamente em http://127.0.0.1:8000/login, mas normalmente o botão da interface é suficiente.
+
+Os endpoints abaixo são úteis apenas para diagnóstico:
 
 ```bash
 curl -X POST http://127.0.0.1:8000/imports
@@ -156,12 +180,9 @@ docker compose run --rm -v ./tests:/app/tests app python -m compileall src tests
 
 ## Próximos passos
 
-1. Validar a decisão manual no Docker e criar um commit próprio.
-2. Criar consultas locais para playlists, faixas e classificações.
-3. Melhorar a fila de revisão com filtros, paginação e decisões em lote.
-4. Adicionar fontes de classificação automática, mantendo a revisão humana para casos ambíguos.
-5. Implementar a prévia de playlists por gênero sem alterar o Spotify.
-6. Implementar sincronização explícita, com confirmação e proteção contra alterações acidentais.
+1. Melhorar a fila de revisão com filtros, paginação e decisões em lote.
+2. Adicionar fontes de classificação automática, mantendo a revisão humana para casos ambíguos.
+3. Implementar sincronização explícita, com confirmação e proteção contra alterações acidentais.
 
 ## Princípios do projeto
 
