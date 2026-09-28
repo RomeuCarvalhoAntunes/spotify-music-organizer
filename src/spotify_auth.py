@@ -187,3 +187,31 @@ async def get_playlist_items(
             offset += limit
 
     return items
+
+# Retrieve Spotify catalog metadata for artists.
+async def get_artists(
+    access_token: str,
+    artist_ids: list[str],
+) -> list[dict]:
+    import asyncio
+
+    semaphore = asyncio.Semaphore(10)
+
+    async with httpx.AsyncClient() as client:
+        async def fetch_artist(artist_id: str) -> dict | None:
+            async with semaphore:
+                try:
+                    response = await client.get(
+                        f"https://api.spotify.com/v1/artists/{artist_id}",
+                        headers={"Authorization": f"Bearer {access_token}"},
+                    )
+                    response.raise_for_status()
+                    return response.json()
+                except httpx.HTTPError:
+                    return None
+
+        artists = await asyncio.gather(
+            *(fetch_artist(artist_id) for artist_id in dict.fromkeys(artist_ids))
+        )
+
+    return [artist for artist in artists if artist]
