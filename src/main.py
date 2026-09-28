@@ -28,6 +28,8 @@ from src.database import (
     list_track_genres,
     list_tracks_for_automatic_classification,
     get_classification_progress,
+    generate_local_playlists,
+    list_local_playlists,
     store_automatic_classifications,
     list_tracks_needing_review,
     rebuild_classifications,
@@ -481,6 +483,19 @@ def create_classification_decision(
         )
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+# Generate local playlists by genre without writing to Spotify.
+@app.post("/local-playlists")
+def create_local_playlists() -> dict[str, object]:
+    return generate_local_playlists()
+
+
+# List local playlists and their tracks in playback order.
+@app.get("/local-playlists")
+def local_playlists() -> dict[str, object]:
+    items = list_local_playlists()
+    return {"total": len(items), "items": items}
 
 
 # Return library classification progress for the web interface.

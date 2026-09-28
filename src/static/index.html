@@ -27,6 +27,7 @@
       <div class="quick-actions">
         <button id="import-button" class="button">Importar biblioteca</button>
         <button id="auto-button" class="button button-secondary">Classificar automaticamente</button>
+        <button id="generate-playlists-button" class="button button-secondary">Gerar playlists locais</button>
         <button id="refresh-button" class="button button-secondary">Atualizar status</button>
       </div>
     </section>
@@ -58,6 +59,11 @@
         <div><strong id="manual-total">0</strong><small>Classificadas manualmente</small></div>
         <div><strong id="pending-total">0</strong><small>Precisam de revisão</small></div>
       </div>
+    </section>
+
+    <section id="local-playlists" class="panel">
+      <div class="panel-heading"><div><p class="eyebrow">Prévia local</p><h2>Playlists por gênero</h2></div><span id="local-playlist-count" class="count-badge">0</span></div>
+      <div id="local-playlist-list" class="local-playlist-list"><p class="muted">Nenhuma playlist local gerada.</p></div>
     </section>
 
     <section id="review" class="panel">

@@ -60,6 +60,27 @@ function renderGenres() {
   `).join("");
 }
 
+function renderLocalPlaylists(playlists) {
+  $("#local-playlist-count").textContent = playlists.length;
+  const list = $("#local-playlist-list");
+  if (!playlists.length) {
+    list.innerHTML = '<p class="muted">Nenhuma playlist local gerada.</p>';
+    return;
+  }
+  list.innerHTML = playlists.map((playlist) => `
+    <article class="local-playlist-card">
+      <div class="panel-heading"><strong>${escapeHtml(playlist.name)}</strong><span class="count-badge">${playlist.track_count} faixas</span></div>
+      <ol>${playlist.tracks.slice(0, 5).map((track) => `<li><a href="${escapeHtml(track.spotify_url)}" target="_blank" rel="noopener">${escapeHtml(track.name)}</a><small>${escapeHtml(track.artists.map((artist) => artist.name).join(", "))}</small></li>`).join("")}</ol>
+      ${playlist.track_count > 5 ? `<small class="muted">+ ${playlist.track_count - 5} faixas nesta playlist local</small>` : ""}
+    </article>
+  `).join("");
+}
+
+async function loadLocalPlaylists() {
+  const data = await api("/local-playlists");
+  renderLocalPlaylists(data.items);
+}
+
 async function loadProgress() {
   const progress = await api("/classifications/progress");
   const percentage = progress.library_count ? Math.round(progress.classified_count / progress.library_count * 100) : 0;
@@ -105,6 +126,7 @@ async function loadStatus() {
   try {
     await loadReview();
     await loadProgress();
+    await loadLocalPlaylists();
     setDot("#review-dot", state.review.length === 0);
   } catch (error) {
     showMessage(error.message, true);
@@ -119,6 +141,21 @@ $("#import-button").addEventListener("click", async () => {
     const result = await api("/imports", { method: "POST" });
     showMessage(`Importação concluída: ${result.playlist_count} playlists e ${result.playlist_track_count} relações.`);
     await loadStatus();
+  } catch (error) {
+    showMessage(error.message, true);
+  } finally {
+    button.disabled = false;
+  }
+});
+
+$("#generate-playlists-button").addEventListener("click", async () => {
+  const button = $("#generate-playlists-button");
+  button.disabled = true;
+  showMessage("Gerando playlists locais por gênero...");
+  try {
+    const result = await api("/local-playlists", { method: "POST" });
+    showMessage(result.playlist_count + " playlists locais geradas com " + result.track_count + " faixas.");
+    await loadLocalPlaylists();
   } catch (error) {
     showMessage(error.message, true);
   } finally {

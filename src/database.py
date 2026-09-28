@@ -139,6 +139,25 @@ def initialize_database(connection: sqlite3.Connection) -> None:
             FOREIGN KEY (track_id) REFERENCES tracks(id) ON DELETE CASCADE,
             FOREIGN KEY (genre_id) REFERENCES genres(id) ON DELETE CASCADE
         );
+
+        CREATE TABLE IF NOT EXISTS local_playlists (
+            id INTEGER PRIMARY KEY,
+            genre_id INTEGER NOT NULL UNIQUE,
+            name TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (genre_id) REFERENCES genres(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS local_playlist_tracks (
+            playlist_id INTEGER NOT NULL,
+            track_id INTEGER NOT NULL,
+            position INTEGER NOT NULL,
+            source_added_at TEXT,
+            PRIMARY KEY (playlist_id, track_id),
+            UNIQUE (playlist_id, position),
+            FOREIGN KEY (playlist_id) REFERENCES local_playlists(id) ON DELETE CASCADE,
+            FOREIGN KEY (track_id) REFERENCES tracks(id) ON DELETE CASCADE
+        );
         """,
     )
     seed_initial_genres(connection)
@@ -774,6 +793,143 @@ def store_automatic_classifications(
             "classified_track_count": len(classified_track_ids),
             "classification_count": classification_count,
         }
+    finally:
+        connection.close()
+
+
+# Generate local playlists from current classifications.
+def generate_local_playlists(path: Path | None = None) -> dict[str, object]:
+    connection = create_connection(path)
+    playlists: list[dict[str, object]] = []
+
+    try:
+        with connection:
+            connection.execute("DELETE FROM local_playlists")
+            genres = connection.execute(
+                """
+                SELECT id, name
+                FROM genres
+                WHERE enabled = 1
+                ORDER BY name COLLATE NOCASE
+                """,
+            ).fetchall()
+
+            for genre_id, genre_name in genres:
+                cursor = connection.execute(
+                    """
+                    INSERT INTO local_playlists (genre_id, name)
+                    VALUES (?, ?)
+                    """,
+                    (genre_id, str(genre_name)),
+                )
+                playlist_id = int(cursor.lastrowid)
+                tracks = connection.execute(
+                    """
+                    SELECT tracks.id, MAX(playlist_tracks.added_at) AS latest_added_at
+                    FROM tracks
+                    JOIN (
+                        SELECT track_id, genre_id
+                        FROM track_genres
+                        UNION
+                        SELECT track_id, genre_id
+                        FROM automatic_track_genres
+                    ) AS classifications
+                        ON classifications.track_id = tracks.id
+                       AND classifications.genre_id = ?
+                    JOIN playlist_tracks
+                        ON playlist_tracks.track_id = tracks.id
+                    GROUP BY tracks.id
+                    ORDER BY latest_added_at DESC, tracks.name COLLATE NOCASE
+                    """,
+                    (genre_id,),
+                ).fetchall()
+                connection.executemany(
+                    """
+                    INSERT INTO local_playlist_tracks (
+                        playlist_id, track_id, position, source_added_at
+                    )
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    [
+                        (playlist_id, int(track_id), position, latest_added_at)
+                        for position, (track_id, latest_added_at) in enumerate(
+                            tracks,
+                            start=1,
+                        )
+                    ],
+                )
+                playlists.append(
+                    {
+                        "id": playlist_id,
+                        "genre_id": int(genre_id),
+                        "name": str(genre_name),
+                        "track_count": len(tracks),
+                    }
+                )
+
+        return {
+            "playlist_count": len(playlists),
+            "track_count": sum(
+                int(playlist["track_count"]) for playlist in playlists
+            ),
+            "items": playlists,
+        }
+    finally:
+        connection.close()
+
+
+# List generated local playlists with their ordered tracks.
+def list_local_playlists(path: Path | None = None) -> list[dict[str, object]]:
+    connection = create_connection(path)
+
+    try:
+        playlists = connection.execute(
+            """
+            SELECT id, genre_id, name, created_at
+            FROM local_playlists
+            ORDER BY name COLLATE NOCASE
+            """,
+        ).fetchall()
+        result: list[dict[str, object]] = []
+
+        for playlist_id, genre_id, name, created_at in playlists:
+            tracks = connection.execute(
+                """
+                SELECT
+                    tracks.spotify_id,
+                    tracks.name,
+                    tracks.artists_json,
+                    local_playlist_tracks.position,
+                    local_playlist_tracks.source_added_at
+                FROM local_playlist_tracks
+                JOIN tracks ON tracks.id = local_playlist_tracks.track_id
+                WHERE local_playlist_tracks.playlist_id = ?
+                ORDER BY local_playlist_tracks.position
+                """,
+                (playlist_id,),
+            ).fetchall()
+            result.append(
+                {
+                    "id": int(playlist_id),
+                    "genre_id": int(genre_id),
+                    "name": str(name),
+                    "created_at": created_at,
+                    "track_count": len(tracks),
+                    "tracks": [
+                        {
+                            "spotify_id": track[0],
+                            "name": track[1],
+                            "artists": json.loads(track[2]),
+                            "position": track[3],
+                            "source_added_at": track[4],
+                            "spotify_url": f"https://open.spotify.com/track/{track[0]}",
+                        }
+                        for track in tracks
+                    ],
+                }
+            )
+
+        return result
     finally:
         connection.close()
 

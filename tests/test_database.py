@@ -7,10 +7,12 @@ from src.database import (
     apply_manual_classification,
     create_genre,
     create_genre_rule,
+    generate_local_playlists,
     get_classification_progress,
     delete_genre,
     import_library,
     list_genres,
+    list_local_playlists,
     list_track_genres,
     list_tracks_needing_review,
     store_automatic_classifications,
@@ -300,6 +302,48 @@ class DatabaseTest(unittest.TestCase):
             self.assertEqual(
                 list_tracks_needing_review(50, 0, database_path)["total"],
                 0,
+            )
+
+    # Verify generated local playlists order tracks from newest to oldest.
+    def test_local_playlist_generation_orders_by_added_at_descending(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            database_path = Path(temporary_directory) / "library.db"
+            items = [
+                create_playlist_item("old-track", "2024-01-01"),
+                create_playlist_item("new-track", "2024-01-03"),
+                create_playlist_item("middle-track", "2024-01-02"),
+            ]
+            import_library(
+                [create_playlist("playlist-one", "Playlist one")],
+                {"playlist-one": items},
+                database_path,
+            )
+            rock_id = next(
+                genre["id"]
+                for genre in list_genres(path=database_path)
+                if genre["name"] == "Rock"
+            )
+            for track_id in ("old-track", "new-track", "middle-track"):
+                apply_manual_classification(
+                    "track",
+                    track_id,
+                    [rock_id],
+                    database_path,
+                )
+
+            result = generate_local_playlists(path=database_path)
+            rock_playlist = next(
+                playlist for playlist in result["items"]
+                if playlist["name"] == "Rock"
+            )
+            stored = next(
+                playlist for playlist in list_local_playlists(path=database_path)
+                if playlist["id"] == rock_playlist["id"]
+            )
+
+            self.assertEqual(
+                [track["spotify_id"] for track in stored["tracks"]],
+                ["new-track", "middle-track", "old-track"],
             )
 
     # Verify automatic classifications are counted separately from manual ones.
