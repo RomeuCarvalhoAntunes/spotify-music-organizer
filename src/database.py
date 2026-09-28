@@ -1045,12 +1045,18 @@ def list_tracks_for_automatic_classification(
                 ON automatic_track_genres.track_id = tracks.id
             LEFT JOIN track_genres
                 ON track_genres.track_id = tracks.id
-            LEFT JOIN automatic_classification_attempts
-                ON automatic_classification_attempts.track_id = tracks.id
-               AND automatic_classification_attempts.provider = 'lastfm'
+            LEFT JOIN automatic_classification_attempts AS lastfm_attempt
+                ON lastfm_attempt.track_id = tracks.id
+               AND lastfm_attempt.provider = 'lastfm'
+            LEFT JOIN automatic_classification_attempts AS spotify_attempt
+                ON spotify_attempt.track_id = tracks.id
+               AND spotify_attempt.provider = 'spotify_artist'
             WHERE automatic_track_genres.track_id IS NULL
               AND track_genres.track_id IS NULL
-              AND automatic_classification_attempts.track_id IS NULL
+              AND (
+                  lastfm_attempt.track_id IS NULL
+                  OR spotify_attempt.track_id IS NULL
+              )
             ORDER BY tracks.id
             LIMIT ? OFFSET ?
             """,

@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from src.automatic_classification import (
     classify_tracks_with_lastfm,
+    classify_tracks_with_spotify_artists,
     get_lastfm_api_key,
 )
 from src.database import (
@@ -523,31 +524,67 @@ async def automatic_classification(
         str(genre["name"]): int(genre["id"])
         for genre in enabled_genres
     }
-    classifications = await classify_tracks_with_lastfm(
+    lastfm_classifications = await classify_tracks_with_lastfm(
         tracks=tracks,
         genre_ids_by_name=genre_ids_by_name,
         api_key=api_key,
     )
-    stored = store_automatic_classifications(
-        classifications=classifications,
+    lastfm_matched_ids = {
+        str(classification["spotify_id"])
+        for classification in lastfm_classifications
+    }
+    lastfm_stored = store_automatic_classifications(
+        classifications=lastfm_classifications,
         provider="lastfm",
     )
-    matched_spotify_ids = {
-        str(classification["spotify_id"])
-        for classification in classifications
-    }
     record_automatic_attempts(
         spotify_ids=[str(track["spotify_id"]) for track in tracks],
         provider="lastfm",
-        matched_spotify_ids=matched_spotify_ids,
+        matched_spotify_ids=lastfm_matched_ids,
     )
 
+    spotify_classifications: list[dict[str, object]] = []
+    try:
+        spotify_access_token = await get_spotify_access_token()
+        spotify_classifications = await classify_tracks_with_spotify_artists(
+            tracks=[
+                track
+                for track in tracks
+                if str(track["spotify_id"]) not in lastfm_matched_ids
+            ],
+            genre_ids_by_name=genre_ids_by_name,
+            access_token=spotify_access_token,
+        )
+        spotify_matched_ids = {
+            str(classification["spotify_id"])
+            for classification in spotify_classifications
+        }
+        record_automatic_attempts(
+            spotify_ids=[str(track["spotify_id"]) for track in tracks],
+            provider="spotify_artist",
+            matched_spotify_ids=spotify_matched_ids,
+        )
+        spotify_stored = store_automatic_classifications(
+            classifications=spotify_classifications,
+            provider="spotify_artist",
+        )
+    except HTTPException:
+        spotify_stored = {"classified_track_count": 0, "classification_count": 0}
+
+    matched_track_ids = lastfm_matched_ids | {
+        str(classification["spotify_id"])
+        for classification in spotify_classifications
+    }
+
     return {
-        "provider": "lastfm",
+        "provider": "lastfm+spotify_artist",
         "processed_track_count": len(tracks),
-        "matched_track_count": stored["classified_track_count"],
-        "no_match_track_count": len(tracks) - stored["classified_track_count"],
-        "classification_count": stored["classification_count"],
+        "matched_track_count": len(matched_track_ids),
+        "no_match_track_count": len(tracks) - len(matched_track_ids),
+        "classification_count": (
+            lastfm_stored["classification_count"]
+            + spotify_stored["classification_count"]
+        ),
         "progress": get_classification_progress(),
     }
 
