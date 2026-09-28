@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from src.database import (
+    apply_manual_classification,
     create_genre,
     create_genre_rule,
     delete_genre,
@@ -249,6 +250,55 @@ class DatabaseTest(unittest.TestCase):
             self.assertEqual(track_two_genres[0]["source"], "album_rule")
             self.assertEqual(track_three_genres[0]["name"], "Rock")
             self.assertEqual(track_three_genres[0]["source"], "artist_rule")
+
+    # Verify a manual decision creates reusable rules and replaces an old decision.
+    def test_manual_classification_decision(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            database_path = Path(temporary_directory) / "library.db"
+            import_library(
+                [create_playlist("playlist-one", "Playlist one")],
+                {
+                    "playlist-one": [
+                        create_playlist_item("track-one", "2024-01-02"),
+                    ],
+                },
+                database_path,
+            )
+            genres_by_name = {
+                genre["name"]: genre
+                for genre in list_genres(path=database_path)
+            }
+
+            first_decision = apply_manual_classification(
+                resource_type="track",
+                spotify_id="track-one",
+                genre_ids=[
+                    genres_by_name["Rock"]["id"],
+                    genres_by_name["Pop"]["id"],
+                ],
+                path=database_path,
+            )
+            self.assertEqual(first_decision["classification_count"], 2)
+            self.assertEqual(
+                {item["name"] for item in list_track_genres("track-one", database_path)},
+                {"Pop", "Rock"},
+            )
+
+            second_decision = apply_manual_classification(
+                resource_type="track",
+                spotify_id="track-one",
+                genre_ids=[genres_by_name["Dance"]["id"]],
+                path=database_path,
+            )
+            self.assertEqual(second_decision["classification_count"], 1)
+            self.assertEqual(
+                [item["name"] for item in list_track_genres("track-one", database_path)],
+                ["Dance"],
+            )
+            self.assertEqual(
+                list_tracks_needing_review(50, 0, database_path)["total"],
+                0,
+            )
 
     # Verify unclassified imported tracks are available for manual review.
     def test_review_queue_lists_unclassified_tracks(self) -> None:

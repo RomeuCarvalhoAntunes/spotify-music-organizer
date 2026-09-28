@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from src.database import (
     create_connection,
     create_genre,
+    apply_manual_classification,
     create_genre_rule,
     delete_genre,
     delete_genre_rule,
@@ -68,6 +69,12 @@ class GenreRuleCreateRequest(BaseModel):
     genre_id: int = Field(gt=0)
     resource_type: Literal["track", "album", "artist"]
     spotify_id: str = Field(min_length=1, max_length=100)
+
+
+class ClassificationDecisionRequest(BaseModel):
+    resource_type: Literal["track", "album", "artist"]
+    spotify_id: str = Field(min_length=1, max_length=100)
+    genre_ids: list[int] = Field(min_length=1)
 
 
 # Load Spotify tokens from local storage into memory.
@@ -223,6 +230,7 @@ async def spotify_callback(
         "message": "Spotify authorization successful.",
     }
 
+
 # Return information about the currently connected Spotify account.
 @app.get("/me")
 async def current_user() -> dict[str, object]:
@@ -235,6 +243,7 @@ async def current_user() -> dict[str, object]:
         "id": profile.get("id"),
         "spotify_url": profile.get("external_urls", {}).get("spotify"),
     }
+
 
 # Return all playlists available to the currently authenticated Spotify user.
 @app.get("/playlists")
@@ -259,6 +268,7 @@ async def current_user_playlists() -> dict[str, object]:
             for playlist in playlists
         ],
     }
+
 
 # Retrieve all tracks from a Spotify playlist without modifying it.
 @app.get("/playlists/{playlist_id}/items")
@@ -424,6 +434,32 @@ def delete_local_genre_rule(rule_id: int) -> Response:
         raise HTTPException(status_code=404, detail="Genre rule was not found.")
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# Apply a manual classification decision and persist it as reusable rules.
+@app.post("/classification/decisions")
+def create_classification_decision(
+    decision: ClassificationDecisionRequest,
+) -> dict[str, object]:
+    enabled_genre_ids = {
+        int(item["id"]) for item in list_genres(include_disabled=False)
+    }
+    selected_genre_ids = set(decision.genre_ids)
+
+    if not selected_genre_ids.issubset(enabled_genre_ids):
+        raise HTTPException(
+            status_code=404,
+            detail="One or more selected genres were not found or are disabled.",
+        )
+
+    try:
+        return apply_manual_classification(
+            resource_type=decision.resource_type,
+            spotify_id=decision.spotify_id,
+            genre_ids=decision.genre_ids,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
 
 
 # Recalculate local classifications from the currently configured rules.

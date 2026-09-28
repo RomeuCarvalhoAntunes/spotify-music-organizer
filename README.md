@@ -41,7 +41,7 @@ A etapa atual é a organização local por gêneros. O código já contém a bas
 - fila paginada de músicas sem classificação;
 - endpoints REST para gêneros, regras, revisão e classificações.
 
-O ponto pendente desta etapa é concluir e validar o fluxo de decisão manual: selecionar um ou mais gêneros para uma faixa, álbum ou artista e transformar a decisão em uma regra reutilizável.
+O fluxo de decisão manual permite selecionar um ou mais gêneros para uma faixa, álbum ou artista e transformar a decisão em regras reutilizáveis. Uma nova decisão substitui as regras anteriores do mesmo recurso.
 
 ## Endpoints principais
 
@@ -71,10 +71,25 @@ GET    /genre-rules
 POST   /genre-rules
 DELETE /genre-rules/{rule_id}
 
+POST   /classification/decisions
 POST   /classifications/rebuild
 GET    /classification/review
 GET    /tracks/{spotify_id}/genres
 ```
+
+## Decisão manual
+
+O endpoint POST /classification/decisions recebe um recurso e um ou mais gêneros. Uma nova decisão substitui as regras anteriores desse mesmo recurso:
+
+```json
+{
+  "resource_type": "track",
+  "spotify_id": "ID_DA_FAIXA",
+  "genre_ids": [15, 19]
+}
+```
+
+Os IDs dos gêneros podem ser consultados em GET /genres?include_disabled=false.
 
 ## Como executar localmente
 
@@ -116,13 +131,12 @@ docker compose run --rm -v ./tests:/app/tests app python -m compileall src tests
 
 ## Próximos passos
 
-1. Finalizar o endpoint e os testes da decisão manual de classificação.
-2. Validar a etapa completa no Docker e criar um commit próprio.
-3. Criar consultas locais para playlists, faixas e classificações.
-4. Melhorar a fila de revisão com filtros, paginação e decisões em lote.
-5. Adicionar fontes de classificação automática, mantendo a revisão humana para casos ambíguos.
-6. Implementar a prévia de playlists por gênero sem alterar o Spotify.
-7. Implementar sincronização explícita, com confirmação e proteção contra alterações acidentais.
+1. Validar a decisão manual no Docker e criar um commit próprio.
+2. Criar consultas locais para playlists, faixas e classificações.
+3. Melhorar a fila de revisão com filtros, paginação e decisões em lote.
+4. Adicionar fontes de classificação automática, mantendo a revisão humana para casos ambíguos.
+5. Implementar a prévia de playlists por gênero sem alterar o Spotify.
+6. Implementar sincronização explícita, com confirmação e proteção contra alterações acidentais.
 
 ## Princípios do projeto
 

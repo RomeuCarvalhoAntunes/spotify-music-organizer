@@ -514,6 +514,63 @@ def create_genre_rule(
         connection.close()
 
 
+# Apply an explicit manual classification decision to one Spotify resource.
+def apply_manual_classification(
+    resource_type: str,
+    spotify_id: str,
+    genre_ids: list[int],
+    path: Path | None = None,
+) -> dict[str, object]:
+    if resource_type not in {"track", "album", "artist"}:
+        raise ValueError("Unsupported resource type.")
+
+    normalized_genre_ids = list(dict.fromkeys(genre_ids))
+    if not normalized_genre_ids:
+        raise ValueError("At least one genre is required.")
+
+    connection = create_connection(path)
+
+    try:
+        placeholders = ",".join("?" for _ in normalized_genre_ids)
+        enabled_genres = connection.execute(
+            f"SELECT id FROM genres WHERE enabled = 1 AND id IN ({placeholders})",
+            normalized_genre_ids,
+        ).fetchall()
+        enabled_genre_ids = {int(row[0]) for row in enabled_genres}
+
+        if enabled_genre_ids != set(normalized_genre_ids):
+            raise ValueError("All selected genres must exist and be enabled.")
+
+        with connection:
+            connection.execute(
+                """
+                DELETE FROM genre_rules
+                WHERE resource_type = ? AND spotify_id = ?
+                """,
+                (resource_type, spotify_id),
+            )
+            connection.executemany(
+                """
+                INSERT INTO genre_rules (genre_id, resource_type, spotify_id)
+                VALUES (?, ?, ?)
+                """,
+                [
+                    (genre_id, resource_type, spotify_id)
+                    for genre_id in normalized_genre_ids
+                ],
+            )
+            rebuild_summary = rebuild_classifications(connection)
+
+        return {
+            "resource_type": resource_type,
+            "spotify_id": spotify_id,
+            "genre_ids": normalized_genre_ids,
+            **rebuild_summary,
+        }
+    finally:
+        connection.close()
+
+
 # Return all local genre rules with their configured genre names.
 def list_genre_rules(path: Path | None = None) -> list[dict[str, object]]:
     connection = create_connection(path)
