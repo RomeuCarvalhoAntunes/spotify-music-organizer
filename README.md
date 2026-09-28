@@ -72,6 +72,8 @@ POST   /genre-rules
 DELETE /genre-rules/{rule_id}
 
 POST   /classification/decisions
+POST   /classifications/automatic
+GET    /classifications/progress
 POST   /classifications/rebuild
 GET    /classification/review
 GET    /tracks/{spotify_id}/genres
@@ -119,6 +121,8 @@ curl -X POST http://127.0.0.1:8000/imports
 curl http://127.0.0.1:8000/classification/review
 curl "http://127.0.0.1:8000/genres?include_disabled=false"
 ```
+
+A classificação automática usa inicialmente as tags do Last.fm. Para habilitá-la, solicite uma API key no Last.fm e preencha LASTFM_API_KEY no .env. As faixas classificadas recebem evidência e confiança localmente; casos sem correspondência continuam na revisão manual.
 
 A interface web está disponível em:
 

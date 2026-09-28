@@ -127,6 +127,18 @@ def initialize_database(connection: sqlite3.Connection) -> None:
             FOREIGN KEY (track_id) REFERENCES tracks(id) ON DELETE CASCADE,
             FOREIGN KEY (genre_id) REFERENCES genres(id) ON DELETE CASCADE
         );
+
+        CREATE TABLE IF NOT EXISTS automatic_track_genres (
+            track_id INTEGER NOT NULL,
+            genre_id INTEGER NOT NULL,
+            provider TEXT NOT NULL,
+            confidence REAL NOT NULL,
+            evidence TEXT,
+            classified_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (track_id, genre_id, provider),
+            FOREIGN KEY (track_id) REFERENCES tracks(id) ON DELETE CASCADE,
+            FOREIGN KEY (genre_id) REFERENCES genres(id) ON DELETE CASCADE
+        );
         """,
     )
     seed_initial_genres(connection)
@@ -706,6 +718,142 @@ def get_rule_classification(
     return set(), None
 
 
+# Store automatic classifications returned by an external metadata provider.
+def store_automatic_classifications(
+    classifications: list[dict[str, object]],
+    provider: str,
+    path: Path | None = None,
+) -> dict[str, int]:
+    connection = create_connection(path)
+    classified_track_ids: set[int] = set()
+    classification_count = 0
+
+    try:
+        with connection:
+            for classification in classifications:
+                spotify_id = str(classification["spotify_id"])
+                track = connection.execute(
+                    "SELECT id FROM tracks WHERE spotify_id = ?",
+                    (spotify_id,),
+                ).fetchone()
+                if not track:
+                    continue
+
+                track_id = int(track[0])
+                genre_ids = [int(genre_id) for genre_id in classification["genre_ids"]]
+                connection.execute(
+                    """
+                    DELETE FROM automatic_track_genres
+                    WHERE track_id = ? AND provider = ?
+                    """,
+                    (track_id, provider),
+                )
+                connection.executemany(
+                    """
+                    INSERT INTO automatic_track_genres (
+                        track_id, genre_id, provider, confidence, evidence
+                    )
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    [
+                        (
+                            track_id,
+                            genre_id,
+                            provider,
+                            float(classification["confidence"]),
+                            classification.get("evidence"),
+                        )
+                        for genre_id in genre_ids
+                    ],
+                )
+                if genre_ids:
+                    classified_track_ids.add(track_id)
+                    classification_count += len(genre_ids)
+
+        return {
+            "classified_track_count": len(classified_track_ids),
+            "classification_count": classification_count,
+        }
+    finally:
+        connection.close()
+
+
+# Return the current local classification progress.
+def get_classification_progress(path: Path | None = None) -> dict[str, int]:
+    connection = create_connection(path)
+
+    try:
+        library_count = int(
+            connection.execute("SELECT COUNT(*) FROM tracks").fetchone()[0]
+        )
+        automatic_count = int(
+            connection.execute(
+                "SELECT COUNT(DISTINCT track_id) FROM automatic_track_genres",
+            ).fetchone()[0]
+        )
+        manual_count = int(
+            connection.execute(
+                "SELECT COUNT(DISTINCT track_id) FROM track_genres",
+            ).fetchone()[0]
+        )
+        classified_count = int(
+            connection.execute(
+                """
+                SELECT COUNT(*) FROM tracks
+                WHERE id IN (
+                    SELECT track_id FROM track_genres
+                    UNION
+                    SELECT track_id FROM automatic_track_genres
+                )
+                """,
+            ).fetchone()[0]
+        )
+        return {
+            "library_count": library_count,
+            "classified_count": classified_count,
+            "automatically_classified_count": automatic_count,
+            "manually_classified_count": manual_count,
+            "needs_manual_count": library_count - classified_count,
+        }
+    finally:
+        connection.close()
+
+
+# Return imported tracks that have not been processed by automatic classification.
+def list_tracks_for_automatic_classification(
+    limit: int,
+    offset: int = 0,
+    path: Path | None = None,
+) -> list[dict[str, object]]:
+    connection = create_connection(path)
+
+    try:
+        rows = connection.execute(
+            """
+            SELECT
+                tracks.spotify_id,
+                tracks.name,
+                tracks.album_name,
+                tracks.album_spotify_id,
+                tracks.release_date,
+                tracks.artists_json
+            FROM tracks
+            LEFT JOIN automatic_track_genres
+                ON automatic_track_genres.track_id = tracks.id
+            LEFT JOIN track_genres
+                ON track_genres.track_id = tracks.id
+            WHERE automatic_track_genres.track_id IS NULL
+              AND track_genres.track_id IS NULL
+            ORDER BY tracks.id
+            LIMIT ? OFFSET ?
+            """,
+            (limit, offset),
+        ).fetchall()
+        return [track_row_to_dict(row) for row in rows]
+    finally:
+        connection.close()
+
+
 # Return tracks without any current local genre classification.
 def list_tracks_needing_review(
     limit: int,
@@ -720,7 +868,10 @@ def list_tracks_needing_review(
             SELECT COUNT(*)
             FROM tracks
             LEFT JOIN track_genres ON track_genres.track_id = tracks.id
+            LEFT JOIN automatic_track_genres
+                ON automatic_track_genres.track_id = tracks.id
             WHERE track_genres.track_id IS NULL
+              AND automatic_track_genres.track_id IS NULL
             """,
         ).fetchone()[0]
         rows = connection.execute(
@@ -734,7 +885,10 @@ def list_tracks_needing_review(
                 tracks.artists_json
             FROM tracks
             LEFT JOIN track_genres ON track_genres.track_id = tracks.id
+            LEFT JOIN automatic_track_genres
+                ON automatic_track_genres.track_id = tracks.id
             WHERE track_genres.track_id IS NULL
+              AND automatic_track_genres.track_id IS NULL
             ORDER BY tracks.release_date DESC, tracks.name COLLATE NOCASE
             LIMIT ? OFFSET ?
             """,
@@ -879,4 +1033,5 @@ def track_row_to_dict(row: sqlite3.Row | tuple) -> dict[str, object]:
         "album_spotify_id": row[3],
         "release_date": row[4],
         "artists": json.loads(row[5]),
+        "spotify_url": f"https://open.spotify.com/track/{row[0]}",
     }

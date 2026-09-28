@@ -7,11 +7,13 @@ from src.database import (
     apply_manual_classification,
     create_genre,
     create_genre_rule,
+    get_classification_progress,
     delete_genre,
     import_library,
     list_genres,
     list_track_genres,
     list_tracks_needing_review,
+    store_automatic_classifications,
     update_genre,
 )
 
@@ -299,6 +301,45 @@ class DatabaseTest(unittest.TestCase):
                 list_tracks_needing_review(50, 0, database_path)["total"],
                 0,
             )
+
+    # Verify automatic classifications are counted separately from manual ones.
+    def test_automatic_classification_progress(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            database_path = Path(temporary_directory) / "library.db"
+            import_library(
+                [create_playlist("playlist-one", "Playlist one")],
+                {
+                    "playlist-one": [
+                        create_playlist_item("track-one", "2024-01-02"),
+                    ],
+                },
+                database_path,
+            )
+            rock_id = next(
+                genre["id"]
+                for genre in list_genres(path=database_path)
+                if genre["name"] == "Rock"
+            )
+
+            result = store_automatic_classifications(
+                [
+                    {
+                        "spotify_id": "track-one",
+                        "genre_ids": [rock_id],
+                        "confidence": 0.8,
+                        "evidence": "rock",
+                    },
+                ],
+                provider="lastfm",
+                path=database_path,
+            )
+            progress = get_classification_progress(path=database_path)
+
+            self.assertEqual(result["classified_track_count"], 1)
+            self.assertEqual(progress["library_count"], 1)
+            self.assertEqual(progress["automatically_classified_count"], 1)
+            self.assertEqual(progress["manually_classified_count"], 0)
+            self.assertEqual(progress["needs_manual_count"], 0)
 
     # Verify unclassified imported tracks are available for manual review.
     def test_review_queue_lists_unclassified_tracks(self) -> None:

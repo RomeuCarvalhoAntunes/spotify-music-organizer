@@ -10,6 +10,10 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
+from src.automatic_classification import (
+    classify_tracks_with_lastfm,
+    get_lastfm_api_key,
+)
 from src.database import (
     create_connection,
     create_genre,
@@ -22,6 +26,9 @@ from src.database import (
     list_genre_rules,
     list_genres,
     list_track_genres,
+    list_tracks_for_automatic_classification,
+    get_classification_progress,
+    store_automatic_classifications,
     list_tracks_needing_review,
     rebuild_classifications,
     update_genre,
@@ -155,6 +162,7 @@ def application_status() -> dict[str, object]:
         "application": "Spotify Music Organizer",
         "status": "running",
         "spotify_connected": bool(load_spotify_tokens()),
+        "automatic_provider_configured": bool(get_lastfm_api_key()),
     }
 
 
@@ -473,6 +481,49 @@ def create_classification_decision(
         )
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+# Return library classification progress for the web interface.
+@app.get("/classifications/progress")
+def classification_progress() -> dict[str, int]:
+    return get_classification_progress()
+
+
+# Classify a batch of pending tracks using Last.fm tags.
+@app.post("/classifications/automatic")
+async def automatic_classification(
+    limit: int = Query(default=25, ge=1, le=100),
+) -> dict[str, object]:
+    api_key = get_lastfm_api_key()
+    if not api_key:
+        raise HTTPException(
+            status_code=503,
+            detail="LASTFM_API_KEY is not configured.",
+        )
+
+    tracks = list_tracks_for_automatic_classification(limit=limit)
+    enabled_genres = list_genres(include_disabled=False)
+    genre_ids_by_name = {
+        str(genre["name"]): int(genre["id"])
+        for genre in enabled_genres
+    }
+    classifications = await classify_tracks_with_lastfm(
+        tracks=tracks,
+        genre_ids_by_name=genre_ids_by_name,
+        api_key=api_key,
+    )
+    stored = store_automatic_classifications(
+        classifications=classifications,
+        provider="lastfm",
+    )
+
+    return {
+        "provider": "lastfm",
+        "processed_track_count": len(tracks),
+        "matched_track_count": stored["classified_track_count"],
+        "classification_count": stored["classification_count"],
+        "progress": get_classification_progress(),
+    }
 
 
 # Recalculate local classifications from the currently configured rules.
