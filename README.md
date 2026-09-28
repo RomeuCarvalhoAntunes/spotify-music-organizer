@@ -97,18 +97,27 @@ Pré-requisitos:
 
 - Docker e Docker Compose.
 - Um aplicativo criado no painel de desenvolvedores do Spotify.
-- Um arquivo `.env` com as credenciais e a URL de callback configuradas.
+- O arquivo `.env` local já contém o Client ID fornecido e a URL http://127.0.0.1:8000/callback.
+- No painel do Spotify, adicione exatamente essa URL como Redirect URI.
 
 Subir a aplicação:
 
 ```bash
-docker compose up --build
+docker compose up --build -d
 ```
 
 Verificar a saúde:
 
 ```bash
 curl http://127.0.0.1:8000/health
+```
+
+Após autorizar em http://127.0.0.1:8000/login:
+
+```bash
+curl -X POST http://127.0.0.1:8000/imports
+curl http://127.0.0.1:8000/classification/review
+curl "http://127.0.0.1:8000/genres?include_disabled=false"
 ```
 
 Abrir o fluxo de autenticação:
