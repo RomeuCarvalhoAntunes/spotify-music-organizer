@@ -81,6 +81,28 @@ async function loadLocalPlaylists() {
   renderLocalPlaylists(data.items);
 }
 
+async function watchOperation(operationId, button, title, onCompleted) {
+  const response = await api("/operations/" + operationId);
+  const percent = response.total ? Math.round(response.processed / response.total * 100) : 0;
+  $("#operation-panel").hidden = false;
+  $("#operation-title").textContent = title;
+  $("#operation-percent").textContent = percent + "%";
+  $("#operation-progress-fill").style.width = percent + "%";
+  $("#operation-phase").textContent = response.phase + (response.current_item ? " · " + response.current_item : "");
+  showMessage(title + ": " + response.phase);
+  if (response.status === "queued" || response.status === "running") {
+    window.setTimeout(() => watchOperation(operationId, button, title, onCompleted), 700);
+    return;
+  }
+  button.disabled = false;
+  $("#operation-panel").hidden = true;
+  if (response.status === "error") {
+    showMessage(response.error || "A operação falhou.", true);
+    return;
+  }
+  await onCompleted(response.result || {});
+}
+
 function renderSpotifyRules(data) {
   $("#spotify-rule-count").textContent = data.genre_playlist_count + " de " + data.total_playlists;
   const list = $("#spotify-rule-list");
@@ -150,30 +172,30 @@ async function loadStatus() {
 $("#import-button").addEventListener("click", async () => {
   const button = $("#import-button");
   button.disabled = true;
-  showMessage("Importando playlists e faixas...");
   try {
-    const result = await api("/imports", { method: "POST" });
-    showMessage(`Importação concluída: ${result.playlist_count} playlists e ${result.playlist_track_count} relações.`);
-    await loadStatus();
+    const operation = await api("/imports", { method: "POST" });
+    await watchOperation(operation.operation_id, button, "Importação", async (result) => {
+      showMessage("Importação concluída: " + result.playlist_count + " playlists e " + result.playlist_track_count + " relações.");
+      await loadStatus();
+    });
   } catch (error) {
-    showMessage(error.message, true);
-  } finally {
     button.disabled = false;
+    showMessage(error.message, true);
   }
 });
 
 $("#generate-playlists-button").addEventListener("click", async () => {
   const button = $("#generate-playlists-button");
   button.disabled = true;
-  showMessage("Gerando playlists locais por gênero...");
   try {
-    const result = await api("/local-playlists", { method: "POST" });
-    showMessage(result.playlist_count + " playlists locais geradas com " + result.track_count + " faixas.");
-    await loadLocalPlaylists();
+    const operation = await api("/local-playlists", { method: "POST" });
+    await watchOperation(operation.operation_id, button, "Playlists locais", async (result) => {
+      showMessage(result.playlist_count + " playlists locais geradas com " + result.track_count + " faixas.");
+      await loadLocalPlaylists();
+    });
   } catch (error) {
-    showMessage(error.message, true);
-  } finally {
     button.disabled = false;
+    showMessage(error.message, true);
   }
 });
 
@@ -183,12 +205,18 @@ async function watchAutomaticJob(jobId, button) {
   const percent = response.total ? Math.round(response.processed / response.total * 100) : 0;
   showMessage("Classificando: " + percent + "% · " + response.phase + (response.current_track ? " · " + response.current_track : ""));
   $("#auto-button").textContent = "Classificar lote de 300 (" + percent + "%)";
+  $("#operation-panel").hidden = false;
+  $("#operation-title").textContent = "Classificação automática";
+  $("#operation-percent").textContent = percent + "%";
+  $("#operation-progress-fill").style.width = percent + "%";
+  $("#operation-phase").textContent = response.phase + (response.current_track ? " · " + response.current_track : "");
   if (response.status === "queued" || response.status === "running") {
     window.setTimeout(() => watchAutomaticJob(jobId, button), 700);
     return;
   }
   button.disabled = false;
   $("#auto-button").textContent = "Classificar lote de 300";
+  $("#operation-panel").hidden = true;
   if (response.status === "error") {
     showMessage(response.error || "A classificação falhou.", true);
     return;
@@ -230,14 +258,15 @@ $("#reset-button").addEventListener("click", async () => {
   const button = $("#reset-button");
   button.disabled = true;
   try {
-    const result = await api("/classifications/reset", { method: "POST" });
-    showMessage("Reset concluído: " + result.automatic_classifications + " classificações automáticas e " + result.manual_classifications + " manuais removidas.");
-    await loadStatus();
-    await loadLocalPlaylists();
+    const operation = await api("/classifications/reset", { method: "POST" });
+    await watchOperation(operation.operation_id, button, "Reset local", async (result) => {
+      showMessage("Reset concluído: " + result.automatic_classifications + " automáticas e " + result.manual_classifications + " manuais removidas.");
+      await loadStatus();
+      await loadLocalPlaylists();
+    });
   } catch (error) {
-    showMessage(error.message, true);
-  } finally {
     button.disabled = false;
+    showMessage(error.message, true);
   }
 });
 

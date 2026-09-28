@@ -12,13 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
-from src.automatic_classification import (
-    classify_tracks_with_lastfm,
-    classify_tracks_with_spotify_artists,
-    classify_tracks_with_spotify_playlists,
-    get_lastfm_api_key,
-    map_spotify_playlist_to_genre,
-)
+from src.automatic_classification import get_lastfm_api_key
 from src.database import (
     create_connection,
     create_genre,
@@ -27,18 +21,11 @@ from src.database import (
     delete_genre,
     delete_genre_rule,
     get_genre,
-    import_library,
     list_genre_rules,
     list_genres,
     list_track_genres,
-    list_tracks_for_automatic_classification,
     get_classification_progress,
-    generate_local_playlists,
     list_local_playlists,
-    list_imported_playlist_snapshots,
-    store_automatic_classifications,
-    record_automatic_attempts,
-    reset_local_classifications,
     list_tracks_needing_review,
     rebuild_classifications,
     update_genre,
@@ -55,6 +42,20 @@ from src.spotify_auth import (
     refresh_access_token,
 )
 from src.spotify_tokens import load_tokens, save_tokens
+from src.services.classification_runner import run_automatic_classification_job
+from src.services.local_operations import (
+    run_local_playlists_operation,
+    run_reset_operation,
+)
+from src.services.operations import (
+    create_operation,
+    get_operation,
+    start_operation,
+)
+from src.services.spotify_library import (
+    fetch_imported_spotify_genre_rules,
+    run_import_operation,
+)
 
 
 load_dotenv()
@@ -335,22 +336,21 @@ async def playlist_items(playlist_id: str) -> dict[str, object]:
     }
 
 
-# Import all Spotify playlists and their tracks into the local SQLite database.
-@app.post("/imports")
-async def import_spotify_library() -> dict[str, int]:
+# Start importing all Spotify playlists into the local SQLite snapshot.
+@app.post("/imports", status_code=status.HTTP_202_ACCEPTED)
+async def import_spotify_library() -> dict[str, object]:
     access_token = await get_spotify_access_token()
-    playlists = await get_current_user_playlists(access_token)
-    playlist_items_by_id = {}
-
-    for playlist in playlists:
-        playlist_items_by_id[playlist["id"]] = await get_playlist_items(
-            access_token=access_token,
-            playlist_id=playlist["id"],
-        )
-
-    import_summary = import_library(playlists, playlist_items_by_id)
-
-    return import_summary.to_dict()
+    operation = create_operation("import")
+    start_operation(
+        str(operation["operation_id"]),
+        lambda operation_id: run_import_operation(
+            operation_id,
+            access_token,
+            get_current_user_playlists,
+            get_playlist_items,
+        ),
+    )
+    return operation
 
 
 # List local genres configured by the user.
@@ -494,10 +494,24 @@ def create_classification_decision(
         raise HTTPException(status_code=400, detail=str(error)) from error
 
 
-# Generate local playlists by genre without writing to Spotify.
-@app.post("/local-playlists")
-def create_local_playlists() -> dict[str, object]:
-    return generate_local_playlists()
+# Start generating local playlists without writing to Spotify.
+@app.post("/local-playlists", status_code=status.HTTP_202_ACCEPTED)
+async def create_local_playlists() -> dict[str, object]:
+    operation = create_operation("local_playlists")
+    start_operation(
+        str(operation["operation_id"]),
+        run_local_playlists_operation,
+    )
+    return operation
+
+
+# Return the live state of an import, reset, or local playlist operation.
+@app.get("/operations/{operation_id}")
+def operation_status(operation_id: str) -> dict[str, object]:
+    operation = get_operation(operation_id)
+    if not operation:
+        raise HTTPException(status_code=404, detail="Operation was not found.")
+    return operation
 
 
 # List local playlists and their tracks in playback order.
@@ -514,36 +528,6 @@ def classification_progress() -> dict[str, int]:
 
 
 # Fetch the user's playlists and retain only names that represent genres.
-def fetch_imported_spotify_genre_rules() -> tuple[
-    list[dict[str, object]], dict[str, list[dict[str, object]]]
-]:
-    playlists = list_imported_playlist_snapshots()
-    playlist_summaries: list[dict[str, object]] = []
-    playlist_tracks_by_genre: dict[str, list[dict[str, object]]] = {}
-
-    for playlist in playlists:
-        genre_name = map_spotify_playlist_to_genre(str(playlist.get("name", "")))
-        summary = {
-            "id": playlist["id"],
-            "name": playlist["name"],
-            "track_count": playlist["track_count"],
-            "spotify_url": playlist["spotify_url"],
-            "genre": genre_name,
-            "rule": (
-                f"Classificar como {genre_name}"
-                if genre_name
-                else "Não usar como regra de gênero"
-            ),
-        }
-        playlist_summaries.append(summary)
-        if genre_name:
-            playlist_tracks_by_genre.setdefault(genre_name, []).extend(
-                playlist["items"]
-            )
-
-    return playlist_summaries, playlist_tracks_by_genre
-
-
 # Show the inferred classification rules from the user's Spotify playlists.
 @app.get("/spotify/classification-rules")
 async def spotify_classification_rules() -> dict[str, object]:
@@ -568,137 +552,6 @@ async def spotify_classification_rules() -> dict[str, object]:
     }
 
 
-async def run_automatic_classification_job(job_id: str, limit: int) -> None:
-    job = automatic_jobs[job_id]
-    try:
-        api_key = get_lastfm_api_key()
-        tracks = list_tracks_for_automatic_classification(limit=limit)
-        job.update({
-            "status": "running",
-            "phase": "lendo playlists do Spotify",
-            "total": len(tracks),
-            "processed": 0,
-            "matched": 0,
-            "current_track": None,
-        })
-        enabled_genres = list_genres(include_disabled=False)
-        genre_ids_by_name = {
-            str(genre["name"]): int(genre["id"])
-            for genre in enabled_genres
-        }
-
-        spotify_access_token = await get_spotify_access_token()
-        playlist_summaries, playlist_tracks_by_genre = fetch_imported_spotify_genre_rules()
-        playlist_classifications = classify_tracks_with_spotify_playlists(
-            tracks=tracks,
-            playlist_tracks_by_genre=playlist_tracks_by_genre,
-            genre_ids_by_name=genre_ids_by_name,
-        )
-        playlist_stored = store_automatic_classifications(
-            classifications=playlist_classifications,
-            provider="spotify_playlist",
-        )
-        playlist_matched_ids = {
-            str(item["spotify_id"]) for item in playlist_classifications
-        }
-        record_automatic_attempts(
-            spotify_ids=[str(track["spotify_id"]) for track in tracks],
-            provider="spotify_playlist",
-            matched_spotify_ids=playlist_matched_ids,
-        )
-        job.update({
-            "phase": "consultando Last.fm",
-            "processed": len(playlist_matched_ids),
-            "matched": len(playlist_matched_ids),
-            "spotify_genre_playlist_count": sum(
-                1 for item in playlist_summaries if item["genre"]
-            ),
-        })
-
-        async def update_progress(processed: int, track: dict[str, object]) -> None:
-            job.update({
-                "phase": "consultando Last.fm",
-                "processed": min(len(tracks), len(playlist_matched_ids) + processed),
-                "matched": len(playlist_matched_ids),
-                "current_track": track.get("name"),
-            })
-
-        remaining_tracks = [
-            track for track in tracks
-            if str(track["spotify_id"]) not in playlist_matched_ids
-        ]
-        lastfm_classifications: list[dict[str, object]] = []
-        if api_key:
-            lastfm_classifications = await classify_tracks_with_lastfm(
-                tracks=remaining_tracks,
-                genre_ids_by_name=genre_ids_by_name,
-                api_key=api_key,
-                progress_callback=update_progress,
-            )
-        else:
-            job.update({
-                "phase": "sem Last.fm; usando Spotify e revisão manual",
-                "processed": len(tracks),
-            })
-        lastfm_matched_ids = {
-            str(classification["spotify_id"])
-            for classification in lastfm_classifications
-        }
-        lastfm_stored = store_automatic_classifications(
-            classifications=lastfm_classifications,
-            provider="lastfm",
-        )
-        record_automatic_attempts(
-            spotify_ids=[str(track["spotify_id"]) for track in remaining_tracks],
-            provider="lastfm",
-            matched_spotify_ids=lastfm_matched_ids,
-        )
-
-        spotify_classifications = await classify_tracks_with_spotify_artists(
-            tracks=[
-                track for track in remaining_tracks
-                if str(track["spotify_id"]) not in lastfm_matched_ids
-            ],
-            genre_ids_by_name=genre_ids_by_name,
-            access_token=spotify_access_token,
-        )
-        spotify_matched_ids = {
-            str(classification["spotify_id"])
-            for classification in spotify_classifications
-        }
-        record_automatic_attempts(
-            spotify_ids=[str(track["spotify_id"]) for track in remaining_tracks],
-            provider="spotify_artist",
-            matched_spotify_ids=spotify_matched_ids,
-        )
-        spotify_stored = store_automatic_classifications(
-            classifications=spotify_classifications,
-            provider="spotify_artist",
-        )
-
-        matched_ids = playlist_matched_ids | lastfm_matched_ids | spotify_matched_ids
-        job.update({
-            "status": "completed",
-            "phase": "concluído",
-            "processed": len(tracks),
-            "matched": len(matched_ids),
-            "no_match": len(tracks) - len(matched_ids),
-            "classification_count": (
-                playlist_stored["classification_count"]
-                + lastfm_stored["classification_count"]
-                + spotify_stored["classification_count"]
-            ),
-            "progress": get_classification_progress(),
-            "current_track": None,
-        })
-    except Exception as error:
-        job.update({
-            "status": "error",
-            "phase": "erro",
-            "error": str(error),
-        })
-
-
 # Start one automatic classification job in the background.
 @app.post("/classifications/automatic", status_code=status.HTTP_202_ACCEPTED)
 async def automatic_classification(
@@ -713,7 +566,15 @@ async def automatic_classification(
         "processed": 0,
         "matched": 0,
     }
-    asyncio.create_task(run_automatic_classification_job(job_id, limit))
+    asyncio.create_task(
+        run_automatic_classification_job(
+            job_id,
+            limit,
+            automatic_jobs,
+            get_spotify_access_token,
+            fetch_imported_spotify_genre_rules,
+        )
+    )
     return automatic_jobs[job_id]
 
 
@@ -726,10 +587,15 @@ def automatic_classification_status(job_id: str) -> dict[str, object]:
     return job
 
 
-# Remove local classifications before a fresh end-to-end run.
-@app.post("/classifications/reset")
-def reset_classifications() -> dict[str, object]:
-    return reset_local_classifications()
+# Start removing local classifications before a fresh end-to-end run.
+@app.post("/classifications/reset", status_code=status.HTTP_202_ACCEPTED)
+async def reset_classifications() -> dict[str, object]:
+    operation = create_operation("reset")
+    start_operation(
+        str(operation["operation_id"]),
+        run_reset_operation,
+    )
+    return operation
 
 
 # Recalculate local classifications from the currently configured rules.

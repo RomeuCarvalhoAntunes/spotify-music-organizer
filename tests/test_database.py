@@ -397,6 +397,47 @@ class DatabaseTest(unittest.TestCase):
                 0,
             )
 
+    # Verify manual classification overrides automatic genre assignments.
+    def test_manual_classification_overrides_automatic(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            database_path = Path(temporary_directory) / "library.db"
+            import_library(
+                [create_playlist("playlist-one", "Playlist one")],
+                {"playlist-one": [create_playlist_item("track-one", "2024-01-02")]},
+                database_path,
+            )
+            genres = {
+                genre["name"]: genre["id"]
+                for genre in list_genres(path=database_path)
+            }
+            store_automatic_classifications(
+                [{
+                    "spotify_id": "track-one",
+                    "genre_ids": [genres["Rock"]],
+                    "confidence": 1.0,
+                    "evidence": "Spotify playlist",
+                }],
+                provider="spotify_playlist",
+                path=database_path,
+            )
+            apply_manual_classification(
+                "track",
+                "track-one",
+                [genres["Pop"]],
+                database_path,
+            )
+
+            progress = get_classification_progress(path=database_path)
+            self.assertEqual(progress["automatically_classified_count"], 0)
+            self.assertEqual(progress["manually_classified_count"], 1)
+
+            generate_local_playlists(path=database_path)
+            local_playlists = list_local_playlists(path=database_path)
+            rock = next(item for item in local_playlists if item["name"] == "Rock")
+            pop = next(item for item in local_playlists if item["name"] == "Pop")
+            self.assertEqual(rock["track_count"], 0)
+            self.assertEqual(pop["track_count"], 1)
+
     # Verify unclassified imported tracks are available for manual review.
     def test_review_queue_lists_unclassified_tracks(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

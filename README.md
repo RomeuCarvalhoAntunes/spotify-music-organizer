@@ -77,6 +77,7 @@ GET    /classifications/automatic/{job_id}
 GET    /classifications/progress
 POST   /classifications/reset
 GET    /spotify/classification-rules
+GET    /operations/{operation_id}
 POST   /local-playlists
 GET    /local-playlists
 POST   /classifications/rebuild
@@ -180,6 +181,30 @@ Validar a sintaxe:
 ```bash
 docker compose run --rm -v ./tests:/app/tests app python -m compileall src tests
 ```
+
+## Regras de negócio
+
+1. O Spotify é a fonte da biblioteca e das playlists importadas; o banco local é um snapshot de trabalho.
+2. Playlists cujo nome representa um gênero podem classificar uma faixa nesse gênero.
+3. Playlists de contexto, origem, artista ou mistura não classificam gênero.
+4. Uma faixa pode ter mais de um gênero quando aparece em mais de uma playlist de gênero.
+5. A playlist Spotify tem prioridade sobre Last.fm e catálogo de artista.
+6. Last.fm e artista são apenas fallbacks para faixas que não foram resolvidas pelas playlists.
+7. Decisão manual tem precedência sobre classificação automática.
+8. Playlists locais são somente prévias e nunca alteram o Spotify implicitamente.
+9. A ordem local usa a data mais recente de adição à biblioteca, da mais nova para a mais antiga.
+10. Faixas sem correspondência permanecem na fila de revisão; não devemos forçar um gênero.
+
+## Organização do projeto
+
+- src/main.py: inicialização da API, autenticação e rotas finas.
+- src/services/operations.py: estado comum das operações demoradas.
+- src/services/spotify_library.py: importação e regras derivadas do snapshot Spotify.
+- src/services/classification_runner.py: execução dos fallbacks de classificação.
+- src/services/local_operations.py: reset e geração de playlists locais.
+- src/automatic_classification.py: normalização e mapeamento dos provedores.
+- src/database.py: persistência SQLite e consultas.
+- src/static: interface web.
 
 ## Próximos passos
 

@@ -69,16 +69,13 @@ class MainAuthTest(unittest.IsolatedAsyncioTestCase):
         )
         persist_mock.assert_called_once_with()
 
-    # Verify a local import fetches items for every available playlist.
-    async def test_import_spotify_library_fetches_all_playlists(self) -> None:
-        playlists = [{"id": "playlist-one"}, {"id": "playlist-two"}]
-        playlist_items = [[{"item": {"id": "track-one"}}], []]
-        summary = ImportSummary(
-            import_id=1,
-            playlist_count=2,
-            playlist_track_count=1,
-            skipped_item_count=0,
-        )
+    # Verify import starts a tracked background operation.
+    async def test_import_spotify_library_starts_operation(self) -> None:
+        operation = {
+            "operation_id": "operation-one",
+            "name": "import",
+            "status": "queued",
+        }
 
         with (
             mock.patch(
@@ -86,29 +83,16 @@ class MainAuthTest(unittest.IsolatedAsyncioTestCase):
                 new=mock.AsyncMock(return_value="access-token"),
             ),
             mock.patch(
-                "src.main.get_current_user_playlists",
-                new=mock.AsyncMock(return_value=playlists),
+                "src.main.create_operation",
+                return_value=operation,
             ),
-            mock.patch(
-                "src.main.get_playlist_items",
-                new=mock.AsyncMock(side_effect=playlist_items),
-            ) as playlist_items_mock,
-            mock.patch(
-                "src.main.import_library",
-                return_value=summary,
-            ) as import_mock,
+            mock.patch("src.main.start_operation") as start_mock,
         ):
             result = await main.import_spotify_library()
 
-        self.assertEqual(result, summary.to_dict())
-        self.assertEqual(playlist_items_mock.await_count, 2)
-        import_mock.assert_called_once_with(
-            playlists,
-            {
-                "playlist-one": playlist_items[0],
-                "playlist-two": playlist_items[1],
-            },
-        )
+        self.assertEqual(result, operation)
+        start_mock.assert_called_once()
+
 
 
 if __name__ == "__main__":

@@ -901,8 +901,13 @@ def generate_local_playlists(path: Path | None = None) -> dict[str, object]:
                         SELECT track_id, genre_id
                         FROM track_genres
                         UNION
-                        SELECT track_id, genre_id
+                        SELECT automatic_track_genres.track_id, automatic_track_genres.genre_id
                         FROM automatic_track_genres
+                        WHERE NOT EXISTS (
+                            SELECT 1
+                            FROM track_genres AS manual
+                            WHERE manual.track_id = automatic_track_genres.track_id
+                        )
                     ) AS classifications
                         ON classifications.track_id = tracks.id
                        AND classifications.genre_id = ?
@@ -1014,7 +1019,15 @@ def get_classification_progress(path: Path | None = None) -> dict[str, int]:
         )
         automatic_count = int(
             connection.execute(
-                "SELECT COUNT(DISTINCT track_id) FROM automatic_track_genres",
+                """
+                SELECT COUNT(DISTINCT automatic_track_genres.track_id)
+                FROM automatic_track_genres
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM track_genres AS manual
+                    WHERE manual.track_id = automatic_track_genres.track_id
+                )
+                """,
             ).fetchone()[0]
         )
         manual_count = int(
