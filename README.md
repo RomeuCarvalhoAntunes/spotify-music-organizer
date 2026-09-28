@@ -120,6 +120,14 @@ curl http://127.0.0.1:8000/classification/review
 curl "http://127.0.0.1:8000/genres?include_disabled=false"
 ```
 
+A interface web está disponível em:
+
+```text
+http://127.0.0.1:8000/
+```
+
+Ela reúne status da aplicação e do Spotify, importação da biblioteca, fila de revisão, gêneros e decisões manuais.
+
 Abrir o fluxo de autenticação:
 
 ```text

@@ -1,11 +1,13 @@
 import os
 import secrets
 import sqlite3
+from pathlib import Path
 from typing import Literal
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query, Response, status
-from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
 from src.database import (
@@ -50,6 +52,12 @@ app = FastAPI(
 )
 
 oauth_sessions: dict[str, str] = {}
+
+STATIC_DIR = Path(__file__).parent / "static"
+
+
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
 spotify_tokens: dict[str, dict] = {}
 
 
@@ -136,8 +144,13 @@ async def get_spotify_access_token() -> str:
 
 
 # Return basic information about the application.
-@app.get("/")
-def home() -> dict[str, object]:
+@app.get("/", response_class=FileResponse)
+def home() -> FileResponse:
+    return FileResponse(STATIC_DIR / "index.html")
+
+
+@app.get("/api/status")
+def application_status() -> dict[str, object]:
     return {
         "application": "Spotify Music Organizer",
         "status": "running",

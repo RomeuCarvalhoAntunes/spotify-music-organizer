@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Spotify Music Organizer</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">Spotify Music Organizer</a>
+    <div class="status-list">
+      <span class="status-pill"><i id="app-dot"></i> App <strong id="app-status">verificando</strong></span>
+      <span class="status-pill"><i id="spotify-dot"></i> Spotify <strong id="spotify-status">desconectado</strong></span>
+      <span class="status-pill"><i id="review-dot"></i> Revisão <strong id="review-status">0</strong></span>
+    </div>
+    <a class="button button-secondary" href="/login">Conectar Spotify</a>
+  </header>
+
+  <main class="container">
+    <section class="hero">
+      <div>
+        <p class="eyebrow">Painel local</p>
+        <h1>Organize sua biblioteca sem sair da tela.</h1>
+        <p class="muted">Importe, revise e classifique suas músicas. Nenhuma alteração é enviada ao Spotify nesta etapa.</p>
+      </div>
+      <div class="quick-actions">
+        <button id="import-button" class="button">Importar biblioteca</button>
+        <button id="refresh-button" class="button button-secondary">Atualizar status</button>
+      </div>
+    </section>
+
+    <div id="message" class="message" hidden></div>
+
+    <section class="dashboard-grid">
+      <article class="panel">
+        <div class="panel-heading"><div><p class="eyebrow">Fluxo</p><h2>Próximas ações</h2></div></div>
+        <ol class="steps">
+          <li><span>1</span><div><strong>Conectar</strong><small>Autorize o acesso de leitura ao Spotify.</small></div></li>
+          <li><span>2</span><div><strong>Importar</strong><small>Crie ou atualize o snapshot local.</small></div></li>
+          <li><span>3</span><div><strong>Revisar</strong><small>Escolha gêneros para as faixas pendentes.</small></div></li>
+        </ol>
+      </article>
+      <article class="panel">
+        <div class="panel-heading"><div><p class="eyebrow">Conta</p><h2 id="account-name">Spotify não conectado</h2></div></div>
+        <p id="account-detail" class="muted">Conecte sua conta para importar playlists e faixas.</p>
+        <a class="text-link" href="/login">Abrir autorização →</a>
+      </article>
+    </section>
+
+    <section id="review" class="panel">
+      <div class="panel-heading">
+        <div><p class="eyebrow">Classificação local</p><h2>Fila de revisão</h2></div>
+        <span id="review-count" class="count-badge">0 pendentes</span>
+      </div>
+      <div class="review-layout">
+        <div id="review-list" class="review-list"><p class="muted">Carregando faixas...</p></div>
+        <form id="decision-form" class="decision-form">
+          <p class="eyebrow">Decisão manual</p>
+          <h3>Aplicar gêneros</h3>
+          <label>Tipo de recurso
+            <select id="resource-type">
+              <option value="track">Faixa</option>
+              <option value="album">Álbum</option>
+              <option value="artist">Artista</option>
+            </select>
+          </label>
+          <label>ID Spotify
+            <input id="spotify-id" required placeholder="Selecione uma faixa ou informe o ID">
+          </label>
+          <fieldset>
+            <legend>Gêneros</legend>
+            <div id="genre-options" class="genre-options"><p class="muted">Carregando gêneros...</p></div>
+          </fieldset>
+          <button class="button" type="submit">Salvar decisão</button>
+          <p class="form-help">Uma nova decisão substitui os gêneros anteriores deste recurso.</p>
+        </form>
+      </div>
+    </section>
+
+    <section id="genres" class="panel">
+      <div class="panel-heading"><div><p class="eyebrow">Configuração local</p><h2>Gêneros disponíveis</h2></div><span id="genre-count" class="count-badge">0</span></div>
+      <div id="genre-list" class="genre-list"><p class="muted">Carregando gêneros...</p></div>
+    </section>
+  </main>
+  <footer>Spotify Music Organizer · dados e decisões permanecem locais</footer>
+  <script src="/static/app.js"></script>
+</body>
+</html>
